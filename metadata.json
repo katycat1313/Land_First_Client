@@ -1,0 +1,6 @@
+{
+  "name": "Problems & Solutions",
+  "description": "Continuous discovery, filtering, and analysis of high-quality business and AI opportunities, combined with helpful outreach assistance and relationship tracking.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

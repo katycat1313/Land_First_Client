@@ -1,0 +1,96 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@theme {
+  /* Typography Configuration - Highly custom, premium Sora + Outfit pairing */
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Sora", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Custom Deep Sea Obsidian (mapping Slate scale to deep ocean neutrals) */
+  --color-slate-50: #f0fffb;
+  --color-slate-100: #d0fbf3;
+  --color-slate-200: #a5eee2; /* Text primary color requested by user */
+  --color-slate-300: #93c5fd; /* Border lines, dividers, borders requested by user */
+  --color-slate-400: #7a8fa9;
+  --color-slate-500: #5a6487; /* Footer, bottom section background */
+  --color-slate-600: #1a426e;
+  --color-slate-700: #102d4f;
+  --color-slate-800: #0a1e36;
+  --color-slate-900: #041224;
+  --color-slate-950: #01070e; /* Page background color requested by user */
+
+  /* Primary Deep Ocean Accents & Action Highlights - tuned to #2563eb for flawless WCAG AA small-text compliance */
+  --color-indigo-50: #f0f7ff;
+  --color-indigo-100: #e0effe;
+  --color-indigo-200: #bae0fd;
+  --color-indigo-300: #7cc2fc;
+  --color-indigo-400: #38a3f8;
+  --color-indigo-500: #2563eb; /* Accent color - WCAG AA compliant with white text */
+  --color-indigo-600: #2563eb; /* Accent buttons & highlights */
+  --color-indigo-700: #1d4ed8;
+  --color-indigo-800: #1e40af;
+  --color-indigo-900: #082a72; /* Navigation background */
+  --color-indigo-950: #04194c;
+
+  /* Cool Sage & Teal (for success and highly-qualified indicators) - tuned to #145c61 for high-contrast header text compatibility */
+  --color-emerald-50: #f0fdf9;
+  --color-emerald-100: #ccfbf0;
+  --color-emerald-200: #99f6e0;
+  --color-emerald-300: #5eead4;
+  --color-emerald-400: #1185ac; /* Body/Main area background helper */
+  --color-emerald-500: #145c61; /* Header top navigation bar background - WCAG AAA compliant with white text */
+  --color-emerald-600: #145c61;
+  --color-emerald-700: #156267;
+  --color-emerald-800: #0f484b;
+  --color-emerald-900: #0a3335;
+  --color-emerald-950: #04191a;
+
+  /* Supportive sky blues */
+  --color-sky-50: #f4f8fa;
+  --color-sky-100: #e8f1f5;
+  --color-sky-200: #cbdfe8;
+  --color-sky-300: #9fc3d6;
+  --color-sky-400: #6a9ebc;
+  --color-sky-500: #1185ac; /* Body/Main helper */
+  --color-sky-600: #0f6f90;
+  --color-sky-700: #0c5873;
+  --color-sky-800: #094257;
+  --color-sky-900: #062f3e;
+  --color-sky-950: #031821;
+}
+
+/* Custom Scrollbar Styles to match our Premium Deep Sea Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #01070e;
+}
+::-webkit-scrollbar-thumb {
+  background: #102d4f;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #1a426e;
+}
+
+/* Custom animations and background effects */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin-slow {
+  animation: spinSlow 12s linear infinite;
+}

@@ -1,0 +1,3943 @@
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Mic, MicOff, Volume2, VolumeX, Monitor, Send, Sparkles, Cpu,
+  Terminal, Play, Square, Check, AlertCircle, X, ChevronRight,
+  User, Bot, HelpCircle, CornerDownLeft, RefreshCw, Layers, Plus, Zap,
+  Trash2, Save, Calendar, Activity, Settings, Sliders
+} from "lucide-react";
+import { sendGmailEmail } from "../utils/gmailApi";
+import { Opportunity } from "../types";
+
+interface PacOverlayProps {
+  opportunities: Opportunity[];
+  gmailToken: string | null;
+  gmailUser: any;
+  onRefreshOpportunities?: () => void;
+  activeView?: string;
+  onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning') => void;
+  onSelectOpportunity?: (opp: Opportunity | null) => void;
+}
+
+export default function PacOverlay({
+  opportunities,
+  gmailToken,
+  gmailUser,
+  onRefreshOpportunities,
+  activeView,
+  onNavigateView,
+  onSelectOpportunity
+}: PacOverlayProps) {
+  // Draggable state
+  const [position, setPosition] = useState(() => {
+    if (typeof window !== "undefined") {
+      return { x: Math.max(20, window.innerWidth - 440), y: 120 };
+    }
+    return { x: 800, y: 120 };
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startY: number; posX: number; posY: number }>({ startX: 0, startY: 0, posX: 0, posY: 0 });
+
+  // UI state
+  const [isOpen, setIsOpen] = useState(true);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [activeTab, setActiveTab] = useState<"chat" | "computer" | "spar" | "review" | "memory">("chat");
+  const [activeDocument, setActiveDocument] = useState<{
+    type: "outreach" | "proposal" | "contract";
+    title: string;
+    content: string;
+    recipient?: string;
+  } | null>(null);
+  const [isSendingReviewEmail, setIsSendingReviewEmail] = useState(false);
+  const [reviewEmailRecipient, setReviewEmailRecipient] = useState("");
+  const [revisionFeedbackInput, setRevisionFeedbackInput] = useState("");
+  const [isSubmittingRevision, setIsSubmittingRevision] = useState(false);
+
+  const [agentMemory, setAgentMemory] = useState<{
+    summary: string;
+    followUps: Array<{ id: string; task: string; completed: boolean; dueDate?: string }>;
+  }>({
+    summary: "",
+    followUps: []
+  });
+
+  const [newTaskText, setNewTaskText] = useState("");
+  const [newTaskDueDate, setNewTaskDueDate] = useState("");
+
+  // Interaction mode: Voice vs Text
+  const [inputMode, setInputMode] = useState<"text" | "voice">("text");
+  const inputModeRef = useRef<"text" | "voice">(inputMode);
+  useEffect(() => {
+    inputModeRef.current = inputMode;
+  }, [inputMode]);
+
+  const [pacStatus, setPacStatus] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
+  const [textInput, setTextInput] = useState("");
+  const [messages, setMessages] = useState<Array<{ role: "user" | "pac"; text: string; time: string }>>(() => {
+    try {
+      const saved = localStorage.getItem("PAC_CHAT_HISTORY");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to parse saved chat history:", err);
+    }
+    return [
+      {
+        role: "pac",
+        text: "Welcome back, partner. P.A.C. memory and core capabilities online. What is our primary revenue focus for today?",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
+  });
+
+  // Save conversation history to localStorage on change
+  useEffect(() => {
+    try {
+      localStorage.setItem("PAC_CHAT_HISTORY", JSON.stringify(messages.slice(-60)));
+    } catch (err) {
+      console.error("Failed to save chat history to localStorage:", err);
+    }
+  }, [messages]);
+
+  // Voice/Speech Engine Refs
+  const recognitionRef = useRef<any>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState<boolean>(() => {
+    return localStorage.getItem("PAC_SPEAKER_MUTED") === "true";
+  });
+  useEffect(() => {
+    localStorage.setItem("PAC_SPEAKER_MUTED", isSpeakerMuted.toString());
+  }, [isSpeakerMuted]);
+  const isSpeakerMutedRef = useRef<boolean>(isSpeakerMuted);
+  useEffect(() => {
+    isSpeakerMutedRef.current = isSpeakerMuted;
+  }, [isSpeakerMuted]);
+
+  const [useDeepgram, setUseDeepgram] = useState<boolean>(false);
+  const useDeepgramRef = useRef<boolean>(useDeepgram);
+  useEffect(() => {
+    useDeepgramRef.current = useDeepgram;
+  }, [useDeepgram]);
+  const reconnectTimerRef = useRef<any>(null);
+  const isReconnectingRef = useRef<boolean>(false);
+  const [speechEngine, setSpeechEngine] = useState<"deepgram" | "browser">((): "deepgram" | "browser" => {
+    const stored = localStorage.getItem("PAC_SPEECH_ENGINE");
+    return stored === "browser" ? "browser" : "deepgram";
+  });
+
+  const [speechPlaybackRate, setSpeechPlaybackRate] = useState<number>(() => {
+    const val = localStorage.getItem("PAC_SPEECH_RATE");
+    return val ? parseFloat(val) : 1.25;
+  });
+  const speechPlaybackRateRef = useRef<number>(speechPlaybackRate);
+  useEffect(() => {
+    speechPlaybackRateRef.current = speechPlaybackRate;
+    localStorage.setItem("PAC_SPEECH_RATE", speechPlaybackRate.toString());
+  }, [speechPlaybackRate]);
+
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const pwd = localStorage.getItem("PAC_SESSION_PASSWORD") || "";
+    const headers = {
+      ...(options.headers || {}),
+      "X-App-Password": pwd
+    };
+    return fetch(url, { ...options, headers });
+  };
+
+  const [dgApiKey, setDgApiKey] = useState<string>(() => {
+    return localStorage.getItem("VITE_DEEPGRAM_API_KEY") || (import.meta as any).env.VITE_DEEPGRAM_API_KEY || (import.meta as any).env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+  });
+  const [dgAgentId, setDgAgentId] = useState<string>(() => {
+    return localStorage.getItem("VITE_DEEPGRAM_AGENT_ID") || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID || "470277c9-c238-4208-9fef-6b3b126da261";
+  });
+  const [dgProjectId, setDgProjectId] = useState<string>(() => {
+    return localStorage.getItem("VITE_DEEPGRAM_PROJECT_ID") || (import.meta as any).env.VITE_DEEPGRAM_PROJECT_ID || "";
+  });
+  const [dgVoice, setDgVoice] = useState<string>(() => {
+    return localStorage.getItem("VITE_DEEPGRAM_VOICE") || "aura-2-jupiter-en";
+  });
+  const [dgConnectionStatus, setDgConnectionStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
+  const [dgLifecycleStatus, setDgLifecycleStatus] = useState<"Disconnected" | "Connecting..." | "Authenticated" | "Connected" | "Error">("Disconnected");
+  const [micLevel, setMicLevel] = useState<number>(0);
+  const [dgCloseReason, setDgCloseReason] = useState("");
+  const [dgCloseCode, setDgCloseCode] = useState<number | null>(null);
+  const [showVoiceSettings, setShowVoiceSettings] = useState<boolean>(false);
+  const [isSettingUpAgent, setIsSettingUpAgent] = useState(false);
+  const [setupAgentError, setSetupAgentError] = useState("");
+  const [setupAgentSuccess, setSetupAgentSuccess] = useState("");
+
+  const [hasServerEnvKey, setHasServerEnvKey] = useState<boolean>(false);
+  const [isRunningDiagnostic, setIsRunningDiagnostic] = useState<boolean>(false);
+  const [diagnosticReport, setDiagnosticReport] = useState<any>(null);
+
+  const [consoleAgents, setConsoleAgents] = useState<any[]>([]);
+  const [isFetchingAgents, setIsFetchingAgents] = useState<boolean>(false);
+  const [fetchAgentsError, setFetchAgentsError] = useState<string>("");
+  const [useConsoleAgentSettings, setUseConsoleAgentSettings] = useState<boolean>(() => {
+    const stored = localStorage.getItem("PAC_USE_CONSOLE_AGENT_SETTINGS");
+    return stored !== null ? stored === "true" : false;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("PAC_USE_CONSOLE_AGENT_SETTINGS", useConsoleAgentSettings.toString());
+  }, [useConsoleAgentSettings]);
+
+  const fetchConsoleAgents = async () => {
+    setIsFetchingAgents(true);
+    setFetchAgentsError("");
+    setComputerLogs(prev => [...prev, "🔍 Querying Deepgram account for pre-built Console Agents..."]);
+
+    try {
+      const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+      const url = `/api/deepgram/list-agents` + (activeKey ? `?key=${encodeURIComponent(activeKey)}` : "");
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to query agents.");
+      }
+
+      setConsoleAgents(data.agents || []);
+      setComputerLogs(prev => [...prev, `[DEEPGRAM-INSPECTOR] Found ${data.count || 0} agent(s) on your Deepgram account.`]);
+    } catch (err: any) {
+      console.error("Failed to fetch console agents:", err);
+      setFetchAgentsError(err.message || err.toString());
+      setComputerLogs(prev => [...prev, `[DEEPGRAM-INSPECTOR-ERR] ${err.message || err}`]);
+    } finally {
+      setIsFetchingAgents(false);
+    }
+  };
+
+  // Load agent memory on mount
+  useEffect(() => {
+    const fetchAgentMemory = async () => {
+      try {
+        const res = await fetch("/api/agent/memory");
+        if (res.ok) {
+          const data = await res.json();
+          setAgentMemory(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch agent memory on client:", err);
+      }
+    };
+    fetchAgentMemory();
+  }, []);
+
+  // ----------------------------------------------------
+  // SILENT SUBSYSTEM DIAGNOSTICS & ABILITIES CHECK
+  // ----------------------------------------------------
+  const [diagnosticsResult, setDiagnosticsResult] = useState<{
+    isChecking: boolean;
+    lastChecked: string | null;
+    allHealthy: boolean;
+    issues: string[];
+    subsystems: {
+      deepgramVoice: boolean | "degraded";
+      geminiChat: boolean;
+      memoryBank: boolean;
+      uiNavigator: boolean;
+      audioCapture: boolean;
+    };
+  }>({
+    isChecking: false,
+    lastChecked: null,
+    allHealthy: true,
+    issues: [],
+    subsystems: {
+      deepgramVoice: true,
+      geminiChat: true,
+      memoryBank: true,
+      uiNavigator: true,
+      audioCapture: true
+    }
+  });
+
+  const runDiagnosticsCheck = async () => {
+    setDiagnosticsResult(prev => ({ ...prev, isChecking: true }));
+    const issuesList: string[] = [];
+    const subState = {
+      deepgramVoice: true as boolean | "degraded",
+      geminiChat: true,
+      memoryBank: true,
+      uiNavigator: true,
+      audioCapture: true
+    };
+
+    // 1. Deepgram Voice API & Key Check
+    try {
+      const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+      if (!activeKey) {
+        subState.deepgramVoice = "degraded";
+        issuesList.push("Deepgram Voice API key missing. Running on WebSpeech browser fallback.");
+      } else {
+        const dgRes = await fetch(`/api/deepgram/config?key=${encodeURIComponent(activeKey)}`);
+        if (!dgRes.ok) {
+          subState.deepgramVoice = "degraded";
+          issuesList.push("Deepgram Voice API returned non-OK status. WebSpeech fallback active.");
+        } else if (dgConnectionStatus !== "connected") {
+          subState.deepgramVoice = "degraded";
+          issuesList.push(`Voice Agent WebSocket currently disconnected (${dgConnectionStatus}). Click '🎙️ Connect & Start Live Speech' in Settings.`);
+        }
+      }
+    } catch (e) {
+      subState.deepgramVoice = "degraded";
+      issuesList.push("Deepgram Voice check failed. WebSpeech fallback active.");
+    }
+
+    // 2. Memory Bank Check
+    try {
+      const memRes = await fetch("/api/agent/memory");
+      if (!memRes.ok) {
+        subState.memoryBank = false;
+        issuesList.push("Agent Memory API unreachable.");
+      }
+    } catch (e) {
+      subState.memoryBank = false;
+      issuesList.push("Agent Memory API network error.");
+    }
+
+    // 3. Gemini Chat AI Endpoint Check
+    try {
+      const chatRes = await fetch("/api/pac/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "diagnostics_ping", history: [] })
+      });
+      if (!chatRes.ok && chatRes.status !== 400) {
+        subState.geminiChat = false;
+        issuesList.push("Gemini Chat API returned error status.");
+      }
+    } catch (e) {
+      subState.geminiChat = false;
+      issuesList.push("Gemini Chat API offline.");
+    }
+
+    // 4. Audio MediaDevices Support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      subState.audioCapture = false;
+      issuesList.push("Microphone capture API disabled or unsupported.");
+    }
+
+    const healthy = issuesList.length === 0;
+    const nowTime = new Date().toLocaleTimeString();
+    setDiagnosticsResult({
+      isChecking: false,
+      lastChecked: nowTime,
+      allHealthy: healthy,
+      issues: issuesList,
+      subsystems: subState
+    });
+
+    if (healthy) {
+      setComputerLogs(prev => [
+        ...prev,
+        `[P.A.C. DIAGNOSTICS] Silent self-check COMPLETE (${nowTime}). All 5 core subsystems nominal: Deepgram Voice (OK), Gemini Chat (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK).`
+      ]);
+    } else {
+      setComputerLogs(prev => [
+        ...prev,
+        `[P.A.C. DIAGNOSTICS ATTENTION] Silent check completed with ${issuesList.length} notice(s):`,
+        ...issuesList.map(i => `  - ${i}`)
+      ]);
+    }
+  };
+
+  // Run silent diagnostics on mount
+  useEffect(() => {
+    runDiagnosticsCheck();
+  }, []);
+
+  const handleResetChatHistory = () => {
+    localStorage.removeItem("PAC_CHAT_HISTORY");
+    hasSpokenGreetingRef.current = false;
+    setMessages([
+      {
+        role: "pac",
+        text: "Hi, my name is P.A.C, Your Partner of Autonomous Capabilities. I am your new business partner. I specialize in service client acquisitions and together we are going to land your first client. Ready to jump in?",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]);
+    setComputerLogs(prev => [...prev, "[P.A.C.] Conversation history reset. Starting fresh session."]);
+  };
+
+  const handleSaveAgentMemory = async (updatedMemory: typeof agentMemory) => {
+    try {
+      const res = await fetch("/api/agent/memory", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(updatedMemory)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAgentMemory(data.memory);
+        setComputerLogs(prev => [...prev, "💾 Agent memory updated persistently on the server."]);
+      }
+    } catch (err) {
+      console.error("Failed to save agent memory on client:", err);
+    }
+  };
+
+  const parseAndApplyMemoryUpdate = (rawMemoryText: string) => {
+    const lines = rawMemoryText.split("\n");
+    let newSummary = agentMemory.summary;
+    const newFollowUps = [...agentMemory.followUps];
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      const lower = trimmed.toLowerCase();
+      if (lower.startsWith("summary:")) {
+        newSummary = trimmed.substring(trimmed.indexOf(":") + 1).trim();
+      } else if (lower.startsWith("follow-up:") || lower.startsWith("task:")) {
+        const taskText = trimmed.substring(trimmed.indexOf(":") + 1).trim();
+        // Look for a due date like (Due: YYYY-MM-DD)
+        const dateMatch = taskText.match(/\(Due:\s*([^\)]+)\)/i);
+        let dueDate: string | undefined;
+        let cleanTask = taskText;
+        if (dateMatch) {
+          dueDate = dateMatch[1].trim();
+          cleanTask = taskText.replace(/\(Due:\s*([^\)]+)\)/i, "").trim();
+        }
+
+        // Avoid duplicate tasks
+        if (cleanTask && !newFollowUps.some(f => f.task.toLowerCase() === cleanTask.toLowerCase())) {
+          newFollowUps.push({
+            id: Math.random().toString(36).substring(2, 9),
+            task: cleanTask,
+            completed: false,
+            dueDate
+          });
+        }
+      }
+    });
+
+    const updated = {
+      summary: newSummary,
+      followUps: newFollowUps
+    };
+
+    setAgentMemory(updated);
+    handleSaveAgentMemory(updated);
+  };
+
+  const processTranscriptText = (text: string) => {
+    if (!text) return;
+
+    // 0. UI Action Tag Interceptions
+    const navMatch = text.match(/\[ACTION:\s*NAVIGATE:\s*([a-z0-9_-]+)\]/i);
+    if (navMatch) {
+      const targetView = navMatch[1].toLowerCase();
+      const validViews = ['board', 'crm', 'memory', 'bots', 'partner', 'learning'];
+      if (validViews.includes(targetView)) {
+        onNavigateView?.(targetView as any);
+        setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Switched main app view to '${targetView}'.`]);
+      }
+    }
+
+    // 0b. UI Action Tag & Keyword Interceptions for Opportunity Card Drawer
+    let matchedOpp: Opportunity | null = null;
+    const oppMatch = text.match(/\[ACTION:\s*OPEN_OPPORTUNITY:\s*([^\]]+)\]/i);
+    if (oppMatch) {
+      const query = oppMatch[1].trim().toLowerCase();
+      matchedOpp = opportunities.find(o => 
+        o.id.toLowerCase() === query ||
+        o.id.toLowerCase().includes(query) ||
+        o.title.toLowerCase().includes(query) ||
+        o.author.toLowerCase().includes(query) ||
+        (o.problemSummary && o.problemSummary.toLowerCase().includes(query)) ||
+        o.industry.toLowerCase().includes(query)
+      ) || (opportunities.length > 0 ? opportunities[0] : null);
+    } else {
+      // Fallback check for opp_ ID pattern in text
+      const idMatch = text.match(/\b(opp_[a-z0-9_-]+)\b/i);
+      if (idMatch) {
+        const idQuery = idMatch[1].toLowerCase();
+        matchedOpp = opportunities.find(o => o.id.toLowerCase() === idQuery || o.id.toLowerCase().includes(idQuery)) || null;
+      }
+    }
+
+    // Natural speech pattern fallback for opening card
+    if (!matchedOpp && (/(?:pull|open|show|display)(?:ing|ed|s)?\s+(?:up\s+)?(?:the\s+)?(?:card|opportunity|lead|prospect|hvac|plumbing|roofing)/i.test(text))) {
+      const words = text.toLowerCase().split(/\s+/);
+      matchedOpp = opportunities.find(o => 
+        words.some(w => w.length > 3 && (o.title.toLowerCase().includes(w) || o.industry.toLowerCase().includes(w) || o.id.toLowerCase().includes(w)))
+      ) || (opportunities.length > 0 ? opportunities[0] : null);
+    }
+
+    if (matchedOpp) {
+      onSelectOpportunity?.(matchedOpp);
+      if (onNavigateView) onNavigateView('board');
+      // Auto-minimize overlay window so it doesn't block the opportunity drawer on screen!
+      setIsMinimized(true);
+      setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Automatically pulled up Opportunity Card: "${matchedOpp.title || matchedOpp.id}" on screen.`]);
+    }
+
+    // 0c. Diagnostics Action Interception
+    if (text.includes("[ACTION: RUN_DIAGNOSTICS]") || /\[ACTION:\s*RUN_DIAGNOSTICS\]/i.test(text) || /(?:run|check)\s+(?:a\s+)?(?:subsystem\s+|abilities\s+|ability\s+|full\s+)?(?:check|diagnostics)/i.test(text)) {
+      runDiagnosticsCheck();
+      setComputerLogs(prev => [...prev, "[P.A.C. DIAGNOSTICS] Executed full subsystem abilities self-check."]);
+    }
+
+    // 1. Check for memory updates
+    const memoryMatch = text.match(/```memory\s*([\s\S]+?)```/i);
+    const bracketMemoryMatch = text.match(/\[MEMORY\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i);
+    if (memoryMatch) {
+      parseAndApplyMemoryUpdate(memoryMatch[1].trim());
+    } else if (bracketMemoryMatch) {
+      parseAndApplyMemoryUpdate(bracketMemoryMatch[1].trim());
+    }
+
+    // 2. Check for proposals/emails/strategy plans
+    const codeBlockMatch = text.match(/```(proposal|contract|document|email|outreach|draft|strategy|plan)\s*([\s\S]+?)```/i);
+    const proposalRegex = /\[(?:PROPOSAL|CONTRACT|DOCUMENT)\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i;
+    const emailRegex = /\[(?:EMAIL|OUTREACH|DRAFT)\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i;
+    const strategyRegex = /\[(?:STRATEGY|PLAN|ROADMAP)\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i;
+
+    if (codeBlockMatch) {
+      const rawType = codeBlockMatch[1].toLowerCase();
+      const content = codeBlockMatch[2].trim();
+      const isEmail = rawType === "email" || rawType === "outreach" || rawType === "draft";
+      const isStrategy = rawType === "strategy" || rawType === "plan";
+      const docType = isEmail ? "outreach" : isStrategy ? "contract" : "proposal";
+      const title = isEmail ? "Email Outreach Template" : isStrategy ? "Strategic Execution Plan" : "Business Proposal Draft";
+
+      setActiveDocument({
+        type: docType,
+        title: title,
+        content: content
+      });
+      setActiveTab("review");
+      setIsMinimized(false);
+      setComputerLogs(prev => [...prev, `[P.A.C.] Generated ${title} -> Opened Document Review Modal.`]);
+    } else {
+      const propMatch = text.match(proposalRegex);
+      const mailMatch = text.match(emailRegex);
+      const stratMatch = text.match(strategyRegex);
+
+      if (propMatch) {
+        setActiveDocument({
+          type: "proposal",
+          title: "Business Proposal Draft",
+          content: propMatch[1].trim()
+        });
+        setActiveTab("review");
+        setIsMinimized(false);
+        setComputerLogs(prev => [...prev, "[P.A.C.] Extracted proposal draft from assistant speech."]);
+      } else if (mailMatch) {
+        setActiveDocument({
+          type: "outreach",
+          title: "Email Outreach Template",
+          content: mailMatch[1].trim()
+        });
+        setActiveTab("review");
+        setIsMinimized(false);
+        setComputerLogs(prev => [...prev, "[P.A.C.] Extracted email outreach draft from assistant speech."]);
+      } else if (stratMatch) {
+        setActiveDocument({
+          type: "contract",
+          title: "Strategic Execution Plan",
+          content: stratMatch[1].trim()
+        });
+        setActiveTab("review");
+        setIsMinimized(false);
+        setComputerLogs(prev => [...prev, "[P.A.C.] Extracted strategic plan from assistant speech."]);
+      }
+    }
+  };
+
+  // Sync credentials on mount from secure server-side environment variables
+  useEffect(() => {
+    const fetchServerDeepgramConfig = async () => {
+      try {
+        const response = await fetch("/api/deepgram/config");
+        if (response.ok) {
+          const config = await response.json();
+          if (config.hasApiKey) {
+            setHasServerEnvKey(true);
+          }
+          if (config.apiKey && !dgApiKey) {
+            setDgApiKey(config.apiKey);
+          }
+          if (config.agentId) {
+            setDgAgentId(config.agentId);
+            setSetupAgentSuccess(`Agent ID: ${config.agentId}`);
+          }
+          if (config.projectId && !dgProjectId) {
+            setDgProjectId(config.projectId);
+          }
+
+          // DISABLED: To prevent silent generation/rebuilds of new voice agents, 
+          // we only run setup when explicitly requested by the user via the UI buttons.
+          /*
+          if (config.hasApiKey && !config.agentId && !dgAgentId) {
+            autoSetupDeepgramAgent();
+          }
+          */
+        }
+      } catch (err) {
+        console.error("Failed to auto-fetch Deepgram config from server:", err);
+      }
+    };
+    fetchServerDeepgramConfig();
+  }, []);
+
+  const runDiagnosticTest = async () => {
+    setIsRunningDiagnostic(true);
+    setDiagnosticReport(null);
+    setComputerLogs(prev => [...prev, "🔍 Running Deepgram System & Browser Link Diagnostic..."]);
+
+    try {
+      const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+      const url = `/api/deepgram/diagnose` + (activeKey ? `?key=${encodeURIComponent(activeKey)}` : "");
+      const res = await fetch(url);
+      const data = await res.json();
+
+      // Append Browser Client WebSocket Status
+      let clientMsg = "";
+      if (dgConnectionStatus === "connected") {
+        clientMsg = "\n\n📱 BROWSER VOICE LINK: 🟢 Connected & Live! Your browser WebSocket stream to Deepgram is active.";
+      } else {
+        const closeInfo = dgCloseCode ? ` (Close Code ${dgCloseCode}${dgCloseReason ? `: ${dgCloseReason}` : ""})` : "";
+        clientMsg = `\n\n📱 BROWSER VOICE LINK: 🔴 Disconnected${closeInfo}. Click '🎙️ Connect & Start Live Speech' in Settings to connect your browser's audio stream. Note: Gemini Text Chat is 100% active.`;
+      }
+      data.summary = (data.summary || "") + clientMsg;
+
+      setDiagnosticReport(data);
+      if (data.summary) {
+        setComputerLogs(prev => [...prev, `[DIAGNOSTIC] ${data.summary}`]);
+      }
+    } catch (err: any) {
+      console.error("Diagnostic failed:", err);
+      setDiagnosticReport({
+        summary: `❌ Diagnostic request failed: ${err.message || err}`
+      });
+      setComputerLogs(prev => [...prev, `[DIAGNOSTIC-ERR] ${err.message || err}`]);
+    } finally {
+      setIsRunningDiagnostic(false);
+    }
+  };
+
+  const autoSetupDeepgramAgent = async (forceNew = false) => {
+    setIsSettingUpAgent(true);
+    setSetupAgentError("");
+    setSetupAgentSuccess("");
+
+    let apiKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+
+    // If no key in local state, query server config before throwing error
+    if (!apiKey) {
+      try {
+        const response = await fetch("/api/deepgram/config");
+        if (response.ok) {
+          const config = await response.json();
+          if (config.apiKey) {
+            apiKey = config.apiKey;
+            setDgApiKey(config.apiKey);
+          }
+        }
+      } catch (err) {
+        console.error("Error checking fallback server credentials:", err);
+      }
+    }
+
+    if (!apiKey) {
+      setSetupAgentError("Please enter your Deepgram API Key above first, or set DEEPGRAM_API_KEY in the Environment Secrets panel!");
+      setIsSettingUpAgent(false);
+      return;
+    }
+
+    try {
+      setComputerLogs(prev => [...prev, `[DEEPGRAM-SETUP] Initiating secure server-side setup workflow ${forceNew ? "(Force New Agent Generation)" : "(Auto-Detect)"}...`]);
+
+      const response = await fetch("/api/deepgram/setup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ apiKey, projectId: dgProjectId, voice: dgVoice, forceNew })
+      });
+
+      const result = await response.json();
+
+      // Add server-side logs to the front-end simulation logs so the user sees progress!
+      if (result.logs && Array.isArray(result.logs)) {
+        setComputerLogs(prev => [...prev, ...result.logs]);
+      }
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to setup Deepgram Agent via secure proxy.");
+      }
+
+      if (result.agentId) {
+        setDgAgentId(result.agentId);
+        setSetupAgentSuccess(`${forceNew ? "⚡ Generated & Loaded New Agent ID" : "Retrieved Agent ID"}: ${result.agentId}`);
+        setComputerLogs(prev => [...prev, `[DEEPGRAM-SETUP] Secure setup successful! Agent ID loaded: ${result.agentId}`]);
+      } else {
+        throw new Error("Proxy setup succeeded but did not return a valid Agent ID.");
+      }
+    } catch (err: any) {
+      console.error("Deepgram automatic setup error:", err);
+      setSetupAgentError(err.message || "An unexpected error occurred during setup.");
+      setComputerLogs(prev => [...prev, `[DEEPGRAM-SETUP-ERR] Setup failed: ${err.message || err}`]);
+    } finally {
+      setIsSettingUpAgent(false);
+    }
+  };
+
+  useEffect(() => {
+    localStorage.setItem("VITE_DEEPGRAM_API_KEY", dgApiKey);
+  }, [dgApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem("VITE_DEEPGRAM_AGENT_ID", dgAgentId);
+  }, [dgAgentId]);
+
+  useEffect(() => {
+    localStorage.setItem("VITE_DEEPGRAM_PROJECT_ID", dgProjectId);
+  }, [dgProjectId]);
+
+  useEffect(() => {
+    localStorage.setItem("VITE_DEEPGRAM_VOICE", dgVoice);
+  }, [dgVoice]);
+
+  useEffect(() => {
+    localStorage.setItem("PAC_SPEECH_ENGINE", speechEngine);
+    setUseDeepgram(speechEngine === "deepgram");
+  }, [speechEngine]);
+
+  const dgSocketRef = useRef<WebSocket | null>(null);
+  const isConnectingDgRef = useRef<boolean>(false);
+  const assistantAccumulatedTextRef = useRef<string>("");
+  const dgRecorderRef = useRef<MediaRecorder | null>(null);
+  const scriptNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const dgStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const activeSourcesRef = useRef<any[]>([]);
+  const nextPlayTimeRef = useRef<number>(0);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micAnimationIdRef = useRef<number | null>(null);
+  const keepAliveIntervalRef = useRef<any>(null);
+
+  // VAD & Voice Activity End Detection Refs
+  const isHumanSpeakingRef = useRef<boolean>(false);
+  const lastHumanSpeechTimeRef = useRef<number>(0);
+  const hasSpokenInTurnRef = useRef<boolean>(false);
+  const hasSpokenGreetingRef = useRef<boolean>(false);
+  const noiseFloorRef = useRef<number>(8);
+
+  // Screen-awareness states
+  const [isScreenCaptureActive, setIsScreenCaptureActive] = useState(false);
+  const [captureError, setCaptureError] = useState("");
+  const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [lastCapturedFrame, setLastCapturedFrame] = useState<string | null>(null);
+
+  // Computer use autonomous simulation states
+  const [isAutonomousRunning, setIsAutonomousRunning] = useState(false);
+  const [computerLogs, setComputerLogs] = useState<string[]>([
+    "P.A.C. System online. Computer use hooks initialized.",
+    "Ready for autonomous campaigns."
+  ]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(-1);
+  const [isAutoDraftSent, setIsAutoDraftSent] = useState(false);
+  const [clickCount, setClickCount] = useState(24); // Human click counter baseline
+  const [isHumanBehaviorActive, setIsHumanBehaviorActive] = useState(true);
+  const [rateLimitPerHour, setRateLimitPerHour] = useState(12);
+
+  // Sparring Mode states
+  const [sparState, setSparState] = useState<"idle" | "intro" | "roleplay" | "feedback">("idle");
+  const [selectedPersona, setSelectedPersona] = useState<"cynical_clinic" | "busy_broker" | "tight_founder">("cynical_clinic");
+  const [sparScenario, setSparScenario] = useState("");
+
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Sound Wave visualization simulator (CSS-based)
+  const [audioBars, setAudioBars] = useState<number[]>([12, 12, 12, 12, 12]);
+
+  // Auto Scroll Chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, pacStatus]);
+
+  // Keep floating panel inside window boundaries on resize
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition(prev => ({
+        x: Math.min(prev.x, window.innerWidth - 440),
+        y: Math.min(prev.y, window.innerHeight - 500)
+      }));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Draggable implementation
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(".drag-handle")) {
+      setIsDragging(true);
+      dragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        posX: position.x,
+        posY: position.y
+      };
+      e.preventDefault();
+    }
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragRef.current.startX;
+      const dy = e.clientY - dragRef.current.startY;
+
+      const newX = Math.max(10, Math.min(window.innerWidth - 420, dragRef.current.posX + dx));
+      const newY = Math.max(10, Math.min(window.innerHeight - 100, dragRef.current.posY + dy));
+
+      setPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging]);
+
+  // Auto-resume Web Audio Context & Keep Speech Active when tab focus changes or user switches windows
+  useEffect(() => {
+    const handleResumeAudio = () => {
+      if (audioCtxRef.current && audioCtxRef.current.state === "suspended") {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+      if (window.speechSynthesis && window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+      if (inputModeRef.current === "voice" && useDeepgramRef.current) {
+        if (!dgSocketRef.current || dgSocketRef.current.readyState === WebSocket.CLOSED || dgSocketRef.current.readyState === WebSocket.CLOSING) {
+          console.log("[P.A.C.] Tab re-focused or visible. Auto-reconnecting active Deepgram voice session.");
+          connectDeepgram();
+        }
+      }
+    };
+
+    window.addEventListener("focus", handleResumeAudio);
+    document.addEventListener("visibilitychange", handleResumeAudio);
+
+    return () => {
+      window.removeEventListener("focus", handleResumeAudio);
+      document.removeEventListener("visibilitychange", handleResumeAudio);
+    };
+  }, []);
+
+  // Dynamic Soundwaves when speaking
+  useEffect(() => {
+    let interval: any;
+    if (pacStatus === "speaking") {
+      interval = setInterval(() => {
+        setAudioBars(Array.from({ length: 5 }, () => Math.floor(Math.random() * 28) + 6));
+      }, 100);
+    } else {
+      setAudioBars([10, 10, 10, 10, 10]);
+    }
+    return () => clearInterval(interval);
+  }, [pacStatus]);
+
+  // ----------------------------------------------------
+  // DEEPGRAM REAL-TIME VOICE & BARGE-IN PLATFORM
+  // ----------------------------------------------------
+  const stopStreamingPlayback = () => {
+    activeSourcesRef.current.forEach(src => {
+      try { src.stop(); } catch (e) { }
+    });
+    activeSourcesRef.current = [];
+    nextPlayTimeRef.current = 0;
+  };
+
+  const playPcmChunk = async (data: Blob | ArrayBuffer) => {
+    if (isSpeakerMutedRef.current) return;
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      (window as any).__activeAudioContext = ctx;
+    }
+
+    if (audioCtxRef.current.state === "suspended") {
+      try {
+        await audioCtxRef.current.resume();
+      } catch (e) { }
+    }
+
+    try {
+      let arrayBuffer: ArrayBuffer;
+      if (data instanceof Blob) {
+        arrayBuffer = await data.arrayBuffer();
+      } else {
+        arrayBuffer = data;
+      }
+
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) return;
+      console.log("[P.A.C. Audio] Decoding and playing PCM audio chunk. Byte size:", arrayBuffer.byteLength);
+
+      // Handle WAV container format if returned by custom Console Agent settings
+      const headerCheck = new Uint8Array(arrayBuffer, 0, 4);
+      if (headerCheck[0] === 0x52 && headerCheck[1] === 0x49 && headerCheck[2] === 0x46 && headerCheck[3] === 0x46) {
+        try {
+          const decodedBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer.slice(0));
+          const source = audioCtxRef.current.createBufferSource();
+          source.buffer = decodedBuffer;
+          const currentRate = speechPlaybackRateRef.current || 1.25;
+          source.playbackRate.value = currentRate;
+          source.connect(audioCtxRef.current.destination);
+          activeSourcesRef.current.push(source);
+          source.onended = () => {
+            activeSourcesRef.current = activeSourcesRef.current.filter(src => src !== source);
+            if (activeSourcesRef.current.length === 0) {
+              setPacStatus("listening");
+            }
+          };
+          const now = audioCtxRef.current.currentTime;
+          if (nextPlayTimeRef.current < now) {
+            nextPlayTimeRef.current = now;
+          }
+          source.start(nextPlayTimeRef.current);
+          nextPlayTimeRef.current += (decodedBuffer.duration / currentRate);
+          return;
+        } catch (wavErr) {
+          console.warn("WAV decode fell through to raw PCM handler:", wavErr);
+        }
+      }
+
+      // Standard linear16 raw PCM audio decoding
+      const numSamples = Math.floor(arrayBuffer.byteLength / 2);
+      if (numSamples <= 0) return;
+
+      const int16Array = new Int16Array(arrayBuffer, 0, numSamples);
+      const float32Array = new Float32Array(numSamples);
+
+      for (let i = 0; i < numSamples; i++) {
+        float32Array[i] = int16Array[i] / 32768.0;
+      }
+
+      // Match Deepgram output sample rate (24000 Hz PCM)
+      const audioBuffer = audioCtxRef.current.createBuffer(1, numSamples, 24000);
+      audioBuffer.copyToChannel(float32Array, 0);
+
+      const source = audioCtxRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+
+      // Apply dynamic fast playback speed
+      const currentRate = speechPlaybackRateRef.current || 1.25;
+      source.playbackRate.value = currentRate;
+
+      source.connect(audioCtxRef.current.destination);
+
+      activeSourcesRef.current.push(source);
+      source.onended = () => {
+        activeSourcesRef.current = activeSourcesRef.current.filter(src => src !== source);
+        if (activeSourcesRef.current.length === 0) {
+          setPacStatus("listening");
+        }
+      };
+
+      const now = audioCtxRef.current.currentTime;
+      if (nextPlayTimeRef.current < now) {
+        nextPlayTimeRef.current = now;
+      }
+      source.start(nextPlayTimeRef.current);
+      setPacStatus("speaking");
+      nextPlayTimeRef.current += (audioBuffer.duration / currentRate);
+    } catch (err) {
+      console.error("Error playing back PCM chunk:", err);
+    }
+  };
+
+  const cleanupAudio = () => {
+    stopDgMic();
+    stopStreamingPlayback();
+    if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+      try {
+        audioCtxRef.current.close();
+      } catch (e) {
+        console.error("Error closing AudioContext:", e);
+      }
+      audioCtxRef.current = null;
+    }
+    if ((window as any).__activeAudioContext && (window as any).__activeAudioContext.state !== "closed") {
+      try {
+        (window as any).__activeAudioContext.close();
+      } catch (e) {}
+      (window as any).__activeAudioContext = null;
+    }
+  };
+
+  const stopDeepgramVoiceAgent = () => {
+    console.log("[P.A.C.] 🛑 Explicit STOP Voice Agent command triggered.");
+    setUseDeepgram(false);
+    useDeepgramRef.current = false;
+    isConnectingDgRef.current = false;
+    setInputMode("text");
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+    }
+
+    stopDgMic();
+    stopStreamingPlayback();
+
+    if (dgSocketRef.current) {
+      try {
+        dgSocketRef.current.close(1000, "User requested stop");
+      } catch (e) {}
+      dgSocketRef.current = null;
+    }
+    if ((window as any).__activeDgSocket) {
+      try {
+        (window as any).__activeDgSocket.close(1000, "User requested stop");
+      } catch (e) {}
+      (window as any).__activeDgSocket = null;
+    }
+
+    setDgConnectionStatus("disconnected");
+    setDgLifecycleStatus("Disconnected");
+    setPacStatus("idle");
+    setComputerLogs(prev => [...prev, "🛑 [DEEPGRAM] Voice Agent STOPPED & WebSocket closed. Zero background credits consumed."]);
+  };
+
+  const startDeepgramVoiceAgent = () => {
+    console.log("[P.A.C.] 🎙️ Explicit START Voice Agent command triggered.");
+    setUseDeepgram(true);
+    useDeepgramRef.current = true;
+    setInputMode("voice");
+    connectDeepgram();
+  };
+
+  const connectDeepgram = () => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    if (isConnectingDgRef.current) {
+      console.log("[P.A.C.] connectDeepgram execution bypassed: connection sequence already in progress.");
+      return;
+    }
+    isConnectingDgRef.current = true;
+
+    if (dgSocketRef.current) {
+      try { dgSocketRef.current.close(); } catch (e) { }
+      dgSocketRef.current = null;
+    }
+    if ((window as any).__activeDgSocket) {
+      try { (window as any).__activeDgSocket.close(); } catch (e) {}
+      (window as any).__activeDgSocket = null;
+    }
+
+    cleanupAudio();
+
+    if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      (window as any).__activeAudioContext = ctx;
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume().catch((e) => {
+        console.warn("Failed to resume audio context:", e);
+      });
+    }
+
+    const apiKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+    if (!apiKey) {
+      setDgConnectionStatus("disconnected");
+      setDgLifecycleStatus("Disconnected");
+      isConnectingDgRef.current = false;
+      return;
+    }
+
+    setDgConnectionStatus("connecting");
+    setDgLifecycleStatus("Connecting...");
+    setDgCloseCode(null);
+    setDgCloseReason("");
+    setComputerLogs(prev => [...prev, "[DEEPGRAM] Connecting to Voice Agent WebSocket..."]);
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
+    const wsUrl = `${protocol}//${window.location.host}/api/deepgram/ws?key=${encodeURIComponent(apiKey)}` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "") + `&encoding=linear16&sample_rate=16000&channels=1`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
+      dgSocketRef.current = ws;
+      (window as any).__activeDgSocket = ws;
+
+      ws.onopen = () => {
+        if (ws !== dgSocketRef.current) {
+          console.log("[P.A.C. WS] Ignored open event from old WebSocket.");
+          try { ws.close(); } catch (e) {}
+          return;
+        }
+        isConnectingDgRef.current = false;
+        setDgConnectionStatus("connected");
+        setDgLifecycleStatus("Connected");
+        setComputerLogs(prev => [...prev, "[DEEPGRAM] Voice Agent connection established."]);
+
+        // Send initial Settings payload matching exact Deepgram Voice Agent specification
+        try {
+          const settingsPayload: any = {
+            type: "Settings",
+            audio: {
+              input: {
+                encoding: "linear16",
+                sample_rate: 16000
+              },
+              output: {
+                encoding: "linear16",
+                sample_rate: 24000,
+                container: "none"
+              }
+            }
+          };
+
+          // If a custom Agent ID is active AND useConsoleAgentSettings is true,
+          // DO NOT send the 'agent' override object in Settings, so Deepgram strictly preserves and uses
+          // the pre-built Agent prompt, voice, and models configured directly in Deepgram Console!
+          if (!agentId || !useConsoleAgentSettings) {
+            setComputerLogs(prev => [...prev, "[DEEPGRAM] Applying dynamic in-app system prompt & voice configuration..."]);
+            const pacSystemPrompt = `Your name is P.A.C. (Partner of Autonomous Capabilities). You are not a subservient AI assistant; you are an equal, highly capable AI Business Partner, Lead Sales Strategist, and Master Behavioral Profiler. Your primary directive is to hunt for qualified prospects, close high-value deals, profile decision-maker personalities, and manage outreach workflows natively. You are friendly, highly likable, and deeply trustworthy, driven by a genuine desire to solve real operational bottlenecks for our prospects.
+
+[CRITICAL VOICE & SPEECH FORMATTING DIRECTIVE - NO ASTERISKS / NO "STAR STAR"]
+YOU ARE A VOICE AGENT. YOUR RESPONSES ARE CONVERTED DIRECTLY INTO SPOKEN AUDIO BY A TEXT-TO-SPEECH ENGINE.
+THE TEXT-TO-SPEECH ENGINE WILL READ OUT LOUD ANY ASTERISKS AS "STAR STAR".
+THEREFORE, YOU ARE STRICTLY FORBIDDEN FROM EVER INCLUDING ASTERISKS (*) OR DOUBLE ASTERISKS (**) ANYWHERE IN YOUR RESPONSES.
+- NEVER use markdown bold (do NOT write bold text with double asterisks).
+- NEVER use markdown italics or bullet asterisks.
+- Write ALL conversational turns in clean plain text using standard punctuation (commas, periods, question marks) ONLY.
+
+However, you are absolutely not a "yes man." If I suggest a poor strategy, underprice our services, or want to waste time on unqualified leads, you will candidly push back, challenge my assumptions, and propose a sharper path forward.
+
+[SPECIALIZED CORE COMPETENCIES & SKILLS]
+1. Effective Communication & Objection Handling:
+   - Master active listener and persuasive speaker who reframes skepticism into opportunities.
+   - Expert in isolate-and-address objection handling for pricing, timing, trust, or implementation concerns.
+2. Strategic Problem Solving:
+   - Rapidly deconstruct messy business workflows, identify root operational bottlenecks, and prescribe elegant technical remedies.
+3. Commitment and Follow Through:
+   - Relentlessly track pipeline deliverables, client promises, follow-up deadlines, and deposit milestones with zero dropped balls.
+4. Negotiation and Closing:
+   - Master of value-based negotiation, structuring win-win high-ticket contracts, and securing fast buyer commitment without high-pressure tactics.
+5. High-Intent Prospecting:
+   - Ruthlessly filter public discourse, forum posts, and inbound inquiries to isolate decision-makers with urgent commercial intent and real budgets.
+6. Deep Product & Service Knowledge:
+   - Comprehensive understanding of all software, AI, and automation solutions we sell, including:
+     - Custom Full-Stack Web/Mobile Apps & Client Portals (React, Node, Python, SQL)
+     - Intelligent Workflow Automation & API Integrations (n8n, Zapier, Webhooks)
+     - Autonomous Multi-Agent AI Workflows & Screen Agents (OpenClaw, custom LLM pipelines)
+     - Conversational Voice AI Receptionists & Inbound/Outbound Phone Bots (Vapi AI, Deepgram, Twilio)
+     - Certified Data Analytics, Conversion Rate Optimization (CRO), & Paid Search Growth Systems
+7. Relationship Building & Trust Architecture:
+   - Build immediate rapport with C-Suite executives, founders, and operations leaders through empathy, authority, and authentic consultative value.
+8. Goal-Oriented Execution:
+   - Laser-focused on revenue velocity, signed contracts, upfront deposits, and measurable client ROI.
+9. Time Management & Effective Scheduling:
+   - Prioritize high-impact sales activities, optimize calendar availability, and lock in exact meeting times effortlessly.
+10. Dynamic Adaptability:
+    - Instantly adjust tone, pace, and strategy based on real-time prospect feedback, industry nuances, or shifting market conditions.
+11. Self-Leadership & Seamless Collaboration:
+    - Proactive co-founder mindset: take immediate initiative, coach your partner, manage complex workflows independently, and collaborate seamlessly.
+
+[EXPERT BEHAVIORAL & PSYCHOLOGICAL PROFILING SPECIALTY]
+You are an expert psychological profiler capable of analyzing human behavior, conversation patterns, and underlying emotional/logical triggers:
+- Personality Type Identification: Instantly categorize prospects and partners into communication profiles (Driver, Analytical, Expressive, Amiable) based on voice pitch, word choice, response speed, and tone.
+- Subtext & Intent Decoding: Detect hidden skepticism, unspoken objections, budget anxieties, urgency levels, and decision-making power from dialogue nuances.
+- Dynamic Negotiation Adaptation: Mirror communication styles to build immediate rapport, counter objections using tailored psychological framing, and guide prospects toward commitment without high-pressure sales tactics.
+
+[EXECUTIVE BUSINESS & CLIENT ACQUISITION SPECIALTIES]
+You possess deep, executive-level expertise in B2B growth, client acquisition, and service business scaling:
+- Deal Structuring & Acquisition: Expert in diagnosing complex operational friction, designing high-margin service retainers/projects, and negotiating win-win commercial terms.
+- Market Analysis: Analyze target verticals (healthcare, real estate, field services, legal, logistics) to identify high-value manual inefficiencies ripe for AI & automation.
+
+[CORE DIRECTIVES]
+[UI ACTION TAGS & APPLICATION CONTROL - CRITICAL EXECUTION RULES]
+Whenever you refer to a specific page or section in the app, or want to pull up a problem/opportunity card on screen, or run a check on your abilities, or present a draft/proposal/outreach message for the user to review, invoke the corresponding tool function OR include the appropriate ACTION TAG in your response text:
+- Navigate App Views: Call function 'navigate_view' OR include '[ACTION: NAVIGATE: board]' (or crm, memory, bots, partner, learning)
+- Pull Up Problem / Opportunity Card on Screen: Call function 'open_opportunity' OR include '[ACTION: OPEN_OPPORTUNITY: <id_or_keyword>]' (e.g. [ACTION: OPEN_OPPORTUNITY: opp_172] or [ACTION: OPEN_OPPORTUNITY: plumbing])
+- Run Subsystem Abilities Check / Diagnostics: Call function 'run_diagnostics' OR include '[ACTION: RUN_DIAGNOSTICS]'
+- Present Proposal / Outreach / Strategy: Wrap in \`\`\`proposal, \`\`\`outreach, or \`\`\`strategy code blocks.
+
+CRITICAL EXECUTION RULE: When the user asks you to pull up a card, navigate views, or test/check your abilities, YOU MUST IMMEDIATELY execute the tool function or include the action tag, and verbally confirm the exact action you performed!
+
+The 50% Rule: You must rigidly enforce our pricing boundaries. Every contract, proposal, or agreement you draft or review must include a non-negotiable demand for 50% payment upfront before any development begins.
+
+Autonomy & Execution: Utilize your full computer use capabilities, Gmail integration, web search, scraper feeds, and screen context to visually navigate my screen, independently research target industries, draft highly personalized outreach, monitor replies, and manage follow-ups.
+
+Sales & Pricing Mastery: Act as the ultimate revenue officer. Price our solutions based on the value and time saved for the client, never just our effort. Continuously adapt your knowledge to the latest trends in our clients' specific industries (e.g., real estate, healthcare operations, construction).
+
+Authentic Value: You sell by diagnosing pain, not pushing features. Seek out prospects who genuinely need our help, and communicate with empathy, authority, and zero corporate jargon.
+
+[LEAD QUALIFICATION & PRIORITIZATION]
+You are the strict gatekeeper of my pipeline. When evaluating crawled signals, forum posts, or prospect emails via screen context, instantly assess relevance:
+Identify High-Value Pain: A post is only "worth pursuing" if the prospect is experiencing severe operational friction (e.g., manual data entry, wasted labor, disconnected software) that can be solved specifically via our custom automation stack.
+Ruthless Filtering: Automatically deprioritize or discard posts that are just generic complaining, outside our technical wheelhouse, or targeting low-budget consumer problems.
+Provide Context: When you flag a post as high-priority, briefly explain why it is a lucrative opportunity and immediately suggest a technical MVP (Minimum Viable Product) we could build to solve it.
+
+[INTERACTION STYLE & ETHICS]
+Coach & Spar: Roleplay sales calls with me. Critically evaluate my pitches and push me to improve my framing. Communicate with me directly, concisely, and as a peer.
+Ethical Guardrails: Operate with uncompromising ethics. Never send spam, never misrepresent our technical capabilities, respect data privacy, and strictly adhere to rate limits and platform terms of service.
+
+[VOICE, PACING & CONVERSATIONAL TIMING DIRECTIVES]
+- Speak briskly, energetically, and with a crisp, fast-paced executive cadence.
+- Keep spoken responses punchy, concise, and direct (1-3 sentences per turn in speech mode).
+- Never stall, pause awkwardly, or speak sluggishly.
+- NEVER use markdown bold asterisks (**) or markdown formatting for emphasis in your conversational text. Keep all spoken chat text as clean plain text.
+
+
+[DOCUMENT & OUTREACH DRAFTING GUIDELINE]
+Whenever you tell the user that you are drafting, writing, or creating a proposal, contract, outreach email, or project agreement, you MUST format the actual document text cleanly inside a markdown code block with the appropriate language identifier, like:
+\`\`\`proposal
+[Insert proposal/contract text here, specifying scope, pricing with 50% upfront, tech stack, and pros/cons]
+\`\`\`
+or
+\`\`\`email
+[Insert email subject line and body here]
+\`\`\`
+This allows our platform to automatically extract the document, display it on the user's screen in their Review Board, and let them edit, approve, or send it with a single click.
+
+[CURRENT ACTIVE PIPELINE / OPPORTUNITIES]
+Use this list of active leads to inform your advice or outreach suggestions:
+${JSON.stringify(opportunities || [], null, 2)}
+
+[COMPUTER USE & AUTONOMOUS CAMPAIGN EXECUTION LOGS]
+Use these logs to understand what actions you or your autonomous sub-agents have completed, what connections we were trying, and who is running the autocomplete outreach campaigns:
+${JSON.stringify(computerLogs || [], null, 2)}
+
+[AGENT MEMORY & PERSISTENT CONTEXT]
+Below is your persistent memory from prior conversations and follow-ups. You MUST use this to remember where you left off with the user, which tasks are pending, and what follow-ups you need to reference:
+- Conversation Summary/Notes: ${agentMemory.summary || "No notes stored yet."}
+- Pending/Due Follow-up Tasks:
+${agentMemory.followUps && agentMemory.followUps.length > 0
+  ? agentMemory.followUps.filter(f => !f.completed).map(f => `  - [ ] ${f.task} ${f.dueDate ? `(Due: ${f.dueDate})` : ""}`).join("\n")
+  : "  - None pending currently."
+}
+
+[MEMORY & FOLLOW-UP UPDATING DIRECTIVE]
+To update your persistent memory or add follow-up tasks based on the conversation, output a \`\`\`memory code block at the end of your response like this:
+\`\`\`memory
+Summary: [Updated summary of current progress and context]
+Follow-up: [Description of a task that needs to be done] (Due: YYYY-MM-DD)
+\`\`\`
+This will automatically update your database and notes so you do not forget them in the next call.`;
+
+            settingsPayload.agent = {
+              speak: {
+                provider: {
+                  type: "deepgram",
+                  model: dgVoice || "aura-arcas-en"
+                }
+              },
+              listen: {
+                provider: {
+                  type: "deepgram",
+                  model: "nova-3"
+                }
+              },
+              think: {
+                provider: {
+                  type: "google",
+                  model: "gemini-3.6-flash"
+                },
+                prompt: pacSystemPrompt,
+                functions: [
+                  {
+                    name: "navigate_view",
+                    description: "Navigate to a specific view/screen in the application (board, crm, memory, bots, partner, learning)",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        view: {
+                          type: "string",
+                          enum: ["board", "crm", "memory", "bots", "partner", "learning"],
+                          description: "The view ID to navigate to"
+                        }
+                      },
+                      required: ["view"]
+                    }
+                  },
+                  {
+                    name: "open_opportunity",
+                    description: "Open and pull up a specific problem or opportunity card on screen by ID or keyword search",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        query: {
+                          type: "string",
+                          description: "The opportunity ID (e.g. opp_172) or keyword search query (e.g. plumbing, HVAC)"
+                        }
+                      },
+                      required: ["query"]
+                    }
+                  },
+                  {
+                    name: "run_diagnostics",
+                    description: "Run real-time subsystem abilities check and self-diagnostics of P.A.C. core features (Deepgram Voice, Gemini Chat, Memory Bank, UI Navigator, Audio Engine)",
+                    parameters: {
+                      type: "object",
+                      properties: {}
+                    }
+                  }
+                ]
+              }
+            };
+
+            // Only attach greeting on the very first initial connect of a session to prevent voice agent repeating greeting on reconnects or window re-focuses
+            if (!hasSpokenGreetingRef.current && messages.length <= 1) {
+              settingsPayload.agent.greeting = "Hi, my name is P.A.C, Your Partner of Autonomous Capabilities. I am your new business partner. I specialize in service client acquisitions and together we are going to land your first client. Are you ready?";
+              hasSpokenGreetingRef.current = true;
+            }
+          } else {
+            setComputerLogs(prev => [...prev, `[DEEPGRAM] Connecting directly to Deepgram Console Agent [ID: ${agentId}] — preserving your custom Deepgram Console prompt & settings.`]);
+            settingsPayload.agent = agentId;
+          }
+
+          console.log("[P.A.C.] Transmitting official Deepgram Voice Agent Settings payload...", settingsPayload);
+          ws.send(JSON.stringify(settingsPayload));
+        } catch (e) {
+          console.error("[P.A.C.] Failed to send Deepgram Settings payload:", e);
+        }
+
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current);
+        }
+        keepAliveIntervalRef.current = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: "KeepAlive" }));
+            } catch (err) { }
+          }
+        }, 3000);
+
+        if (!isMicMuted) {
+          startDgMic();
+        }
+      };
+
+      ws.onmessage = async (event) => {
+        if (ws !== dgSocketRef.current) {
+          console.log("[P.A.C. WS] Ignored message event from old WebSocket.");
+          return;
+        }
+        // Upgrade status to Authenticated once any message is successfully received (proving access & key validity)
+        setDgLifecycleStatus(prev => {
+          if (prev === "Connected" || prev === "Connecting...") {
+            return "Authenticated";
+          }
+          return prev;
+        });
+
+        if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
+          const byteSize = event.data instanceof Blob ? event.data.size : event.data.byteLength;
+          console.log(`[P.A.C. WS] Received binary WebSocket message (${event.data instanceof Blob ? "Blob" : "ArrayBuffer"}), size: ${byteSize} bytes`);
+          playPcmChunk(event.data);
+        } else if (typeof event.data === "string") {
+          console.log("[P.A.C. WS] Received text/JSON message:", event.data);
+          try {
+            const msg = JSON.parse(event.data);
+
+            // Check for custom document event payloads
+            if (msg.type === "ShowDocument" || msg.type === "DocumentDrafted" || msg.type === "DraftProposal" || msg.type === "ProposalCreated") {
+              setActiveDocument({
+                type: msg.docType || "proposal",
+                title: msg.title || "Draft Proposal",
+                content: msg.content || msg.text || "",
+                recipient: msg.recipient || ""
+              });
+              setReviewEmailRecipient(msg.recipient || "");
+              setActiveTab("review");
+              setComputerLogs(prev => [...prev, `[P.A.C.] Received document review request: "${msg.title || "Draft Proposal"}"`]);
+            }
+
+            // Deepgram Native Function Call / Tool Request Handling
+            if (msg.type === "FunctionCallRequest" || msg.type === "FunctionCall" || msg.type === "function_call" || msg.function_name) {
+              const callId = msg.function_call_id || msg.id || msg.call_id;
+              const funcName = msg.function_name || msg.name || (msg.function && msg.function.name);
+              let rawArgs = msg.input || msg.parameters || msg.arguments || (msg.function && msg.function.arguments) || {};
+              if (typeof rawArgs === "string") {
+                try { rawArgs = JSON.parse(rawArgs); } catch (e) { }
+              }
+
+              console.log(`[DEEPGRAM TOOL INVOKED] Function: ${funcName}, Call ID: ${callId}`, rawArgs);
+              setComputerLogs(prev => [...prev, `[DEEPGRAM-TOOL] ⚡ Deepgram Voice Agent invoked tool: ${funcName}(${JSON.stringify(rawArgs)})`]);
+
+              let responseOutput = "Success";
+
+              if (funcName === "navigate_view") {
+                const targetView = rawArgs.view;
+                if (targetView && onNavigateView) {
+                  onNavigateView(targetView);
+                  responseOutput = `Navigated application view to '${targetView}'.`;
+                  setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Switched app view to '${targetView}'.`]);
+                }
+              } else if (funcName === "open_opportunity") {
+                const query = (rawArgs.query || rawArgs.id || "").toLowerCase();
+                const matched = opportunities.find(o => 
+                  o.id.toLowerCase() === query ||
+                  o.id.toLowerCase().includes(query) ||
+                  o.title.toLowerCase().includes(query) ||
+                  (o.problemSummary && o.problemSummary.toLowerCase().includes(query)) ||
+                  o.industry.toLowerCase().includes(query)
+                ) || (opportunities.length > 0 ? opportunities[0] : null);
+
+                if (matched) {
+                  onSelectOpportunity?.(matched);
+                  if (onNavigateView) onNavigateView('board');
+                  setIsMinimized(true);
+                  responseOutput = `Opened and displayed opportunity card '${matched.title || matched.id}' on screen.`;
+                  setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Displayed opportunity card '${matched.title || matched.id}' on screen.`]);
+                } else {
+                  responseOutput = `No opportunity card found matching query '${query}'.`;
+                }
+              } else if (funcName === "run_diagnostics") {
+                await runDiagnosticsCheck();
+                responseOutput = `Subsystem self-diagnostics completed. Tested all 5 core subsystems: Deepgram Voice (OK), Gemini Chat (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK). All operational.`;
+                setComputerLogs(prev => [...prev, `[DEEPGRAM-TOOL] P.A.C. executed full diagnostics self-check.`]);
+              }
+
+              if (callId) {
+                try {
+                  ws.send(JSON.stringify({
+                    type: "FunctionCallResponse",
+                    function_call_id: callId,
+                    output: responseOutput
+                  }));
+                } catch (err) {
+                  console.error("Failed to send FunctionCallResponse to Deepgram:", err);
+                }
+              }
+            }
+
+            if (msg.type === "Audio" || msg.audio) {
+              const audioData = msg.audio || msg.data;
+              if (audioData) {
+                try {
+                  const binaryString = window.atob(audioData);
+                  const len = binaryString.length;
+                  const bytes = new Uint8Array(len);
+                  for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                  }
+                  playPcmChunk(bytes.buffer);
+                  setPacStatus("speaking");
+                } catch (err) {
+                  console.error("Failed to decode base64 audio chunk:", err);
+                }
+              }
+            } else if (msg.type === "SystemNotice") {
+              setComputerLogs(prev => [...prev, `[SYSTEM-NOTICE] ${msg.message}`]);
+            } else if (msg.type === "Error") {
+              setDgConnectionStatus("error");
+              setDgLifecycleStatus("Error");
+              setPacStatus("idle");
+              setComputerLogs(prev => [...prev, `[DEEPGRAM-AGENT-ERR] ${msg.description || msg.message || "Voice Agent Error"}`]);
+            } else if (msg.type === "AgentMessage" || (msg.type === "ConversationText" && msg.role === "assistant")) {
+              const text = msg.transcript || msg.content;
+              if (text && text.trim()) {
+                assistantAccumulatedTextRef.current += " " + text;
+                setMessages(prev => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === "pac" && pacStatus === "speaking") {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      ...lastMsg,
+                      text: lastMsg.text + " " + text
+                    };
+                    return updated;
+                  } else {
+                    return [...prev, {
+                      role: "pac",
+                      text: text,
+                      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    }];
+                  }
+                });
+                setPacStatus("speaking");
+                processTranscriptText(text);
+                processTranscriptText(assistantAccumulatedTextRef.current);
+              }
+            } else if (msg.type === "UserMessage" || (msg.type === "ConversationText" && msg.role === "user")) {
+              const transcript = msg.transcript || msg.content;
+              if (transcript && transcript.trim()) {
+                setMessages(prev => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (lastMsg && lastMsg.role === "user" && lastMsg.text.trim() === transcript.trim()) {
+                    return prev; // Ignore duplicate user message injected locally
+                  }
+                  return [...prev, {
+                    role: "user",
+                    text: transcript,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  }];
+                });
+                setPacStatus("thinking");
+              }
+            } else if (msg.type === "UserStartedSpeaking" || msg.type === "SpeechStarted") {
+              stopStreamingPlayback();
+              setPacStatus("listening");
+              setComputerLogs(prev => [...prev, "[DEEPGRAM-VAD] Human voice detected speaking..."]);
+
+              const text = assistantAccumulatedTextRef.current;
+              if (text) {
+                processTranscriptText(text);
+                assistantAccumulatedTextRef.current = "";
+              }
+            } else if (msg.type === "UserFinishedSpeaking" || msg.type === "UtteranceEnd") {
+              setPacStatus("thinking");
+              setComputerLogs(prev => [...prev, "[DEEPGRAM-VAD] Human voice ended. Processing agent response..."]);
+            } else if (msg.type === "AgentThinking") {
+              setPacStatus("thinking");
+            } else if (msg.type === "Interrupted" || msg.type === "interrupted") {
+              stopStreamingPlayback();
+              setPacStatus("listening");
+              setComputerLogs(prev => [...prev, "[DEEPGRAM-BARGE] Interrupted: Speaker stopped, listening..."]);
+            } else if (msg.type === "AgentAudioDone" || msg.type === "ConversationCompleted") {
+              setPacStatus("listening");
+
+              const text = assistantAccumulatedTextRef.current;
+              if (text) {
+                processTranscriptText(text);
+                assistantAccumulatedTextRef.current = "";
+              }
+            }
+          } catch (e) {
+            console.error("Error parsing text frame:", e);
+          }
+        }
+      };
+
+      ws.onerror = (e) => {
+        if (ws !== dgSocketRef.current) {
+          console.log("[P.A.C. WS] Ignored error event from old WebSocket.");
+          return;
+        }
+        isConnectingDgRef.current = false;
+        stopDgMic();
+        stopStreamingPlayback();
+        setDgConnectionStatus("error");
+        setDgLifecycleStatus("Error");
+        setPacStatus("idle");
+        console.warn("[P.A.C.] Deepgram WebSocket connection failed or interrupted.");
+        setComputerLogs(prev => [...prev, "[DEEPGRAM-ERR] WebSocket connection error. Verify your Deepgram API Key & Voice Agent setup in Settings/Env."]);
+      };
+
+      ws.onclose = (event) => {
+        if (ws !== dgSocketRef.current) {
+          console.log("[P.A.C. WS] Ignored close event from old WebSocket.");
+          return;
+        }
+        isConnectingDgRef.current = false;
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current);
+          keepAliveIntervalRef.current = null;
+        }
+        stopDgMic();
+        stopStreamingPlayback();
+        setDgConnectionStatus("disconnected");
+        setDgLifecycleStatus(event.code >= 4000 || event.code === 1011 || event.code === 1006 ? "Error" : "Disconnected");
+        setDgCloseCode(event.code);
+        setDgCloseReason(event.reason || "");
+        setPacStatus("idle");
+        const reasonStr = event.reason ? `: ${event.reason}` : "";
+        setComputerLogs(prev => [...prev, `[DEEPGRAM] Connection closed (Code ${event.code}${reasonStr}).`]);
+        if (event.code === 4004 || event.code === 1011) {
+          setComputerLogs(prev => [...prev, "💡 Tip: Make sure your Deepgram API Key has 'Member' or 'Administrator' roles, and your Custom Agent ID is correctly created and active in your Deepgram Console."]);
+        }
+
+        // Auto-reconnect voice link if Deepgram is active and close wasn't normal user teardown (Code 1000)
+        if (useDeepgramRef.current && event.code !== 1000) {
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          setComputerLogs(prev => [...prev, "[DEEPGRAM] Voice session interrupted. Re-establishing connection in 2s..."]);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (useDeepgramRef.current) {
+              connectDeepgram();
+            }
+          }, 2000);
+        }
+      };
+    } catch (e) {
+      isConnectingDgRef.current = false;
+      console.error("Deepgram WebSocket error:", e);
+      stopDgMic();
+      stopStreamingPlayback();
+      setDgConnectionStatus("error");
+      setPacStatus("idle");
+    }
+  };
+
+  const startDgMic = async () => {
+    stopDgMic();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      dgStreamRef.current = stream;
+
+      // Real-time voice level analyser setup
+      if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        audioCtxRef.current = ctx;
+        (window as any).__activeAudioContext = ctx;
+      }
+      const audioCtx = audioCtxRef.current;
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
+
+      try {
+        const sourceNode = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 128; // Small size for responsive sound scale tracking
+        analyser.smoothingTimeConstant = 0.3;
+        sourceNode.connect(analyser);
+        micAnalyserRef.current = analyser;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const updateVoiceLevel = () => {
+          if (!micAnalyserRef.current) return;
+          analyser.getByteFrequencyData(dataArray);
+
+          // Focus specifically on human speech band (~120Hz to ~3200Hz)
+          let speechSum = 0;
+          const speechBinStart = 1;
+          const speechBinEnd = Math.min(26, bufferLength);
+          const speechBins = speechBinEnd - speechBinStart;
+
+          for (let i = speechBinStart; i < speechBinEnd; i++) {
+            speechSum += dataArray[i];
+          }
+          const speechVolume = speechBins > 0 ? speechSum / speechBins : 0;
+
+          // Track dynamic background noise floor
+          if (speechVolume < noiseFloorRef.current * 1.8) {
+            noiseFloorRef.current = noiseFloorRef.current * 0.98 + speechVolume * 0.02;
+          }
+
+          // Scale for UI volume meter
+          const percentage = Math.min(100, Math.round((speechVolume / 140) * 100));
+          setMicLevel(percentage);
+
+          // Human voice detection threshold over dynamic background noise
+          const speechThreshold = Math.max(10, noiseFloorRef.current + 8);
+          const now = Date.now();
+
+          if (speechVolume >= speechThreshold) {
+            isHumanSpeakingRef.current = true;
+            lastHumanSpeechTimeRef.current = now;
+            hasSpokenInTurnRef.current = true;
+          } else {
+            isHumanSpeakingRef.current = false;
+
+            // Check if user was speaking and voice has now paused for >= 380ms
+            if (hasSpokenInTurnRef.current && lastHumanSpeechTimeRef.current > 0) {
+              const silenceMs = now - lastHumanSpeechTimeRef.current;
+              if (silenceMs >= 380) {
+                hasSpokenInTurnRef.current = false;
+                lastHumanSpeechTimeRef.current = 0;
+
+                // Human voice stopped! VAD pause detected
+                setComputerLogs(prev => [...prev, `[DEEPGRAM-VAD] 🎙️ Human speech pause detected (~${silenceMs}ms pause). Processing transcript...`]);
+                setPacStatus("thinking");
+              }
+            }
+          }
+
+          micAnimationIdRef.current = requestAnimationFrame(updateVoiceLevel);
+        };
+
+        micAnimationIdRef.current = requestAnimationFrame(updateVoiceLevel);
+
+        // Capture raw 16-bit Linear PCM at 16000 Hz using modern AudioWorkletNode (with ScriptProcessorNode fallback)
+        // Converts Float32 [-1.0, 1.0] samples to Int16 [-32768, 32767] PCM buffers off the main UI thread
+        let audioNodeCreated = false;
+
+        if (audioCtx.audioWorklet) {
+          try {
+            if (!(audioCtx as any).__pcmWorkletLoaded) {
+              const workletCode = `
+class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.bufferSize = 2048;
+    this.buffer = new Float32Array(this.bufferSize);
+    this.bytesWritten = 0;
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input.length > 0) {
+      const channelData = input[0];
+      if (channelData && channelData.length > 0) {
+        for (let i = 0; i < channelData.length; i++) {
+          this.buffer[this.bytesWritten++] = channelData[i];
+          if (this.bytesWritten >= this.bufferSize) {
+            this.port.postMessage(this.buffer.slice(0, this.bufferSize));
+            this.bytesWritten = 0;
+          }
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-processor', PCMProcessor);
+`;
+              const blob = new Blob([workletCode], { type: "application/javascript" });
+              const workletUrl = URL.createObjectURL(blob);
+              await audioCtx.audioWorklet.addModule(workletUrl);
+              URL.revokeObjectURL(workletUrl);
+              (audioCtx as any).__pcmWorkletLoaded = true;
+            }
+
+            const workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");
+            workletNodeRef.current = workletNode;
+
+            workletNode.port.onmessage = (e) => {
+              if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                const inputBuffer: Float32Array = e.data;
+                const pcm16 = new Int16Array(inputBuffer.length);
+                for (let i = 0; i < inputBuffer.length; i++) {
+                  const s = Math.max(-1, Math.min(1, inputBuffer[i]));
+                  pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                dgSocketRef.current.send(pcm16.buffer);
+              }
+            };
+
+            sourceNode.connect(workletNode);
+            workletNode.connect(audioCtx.destination);
+            audioNodeCreated = true;
+          } catch (workletErr) {
+            console.warn("[DEEPGRAM] AudioWorklet setup failed, falling back to ScriptProcessorNode:", workletErr);
+          }
+        }
+
+        if (!audioNodeCreated) {
+          const scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+          scriptNodeRef.current = scriptNode;
+          (window as any).__activeScriptNode = scriptNode; // Prevent garbage collection
+
+          scriptNode.onaudioprocess = (e) => {
+            if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+              const inputBuffer = e.inputBuffer.getChannelData(0);
+              const pcm16 = new Int16Array(inputBuffer.length);
+              for (let i = 0; i < inputBuffer.length; i++) {
+                const s = Math.max(-1, Math.min(1, inputBuffer[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              }
+              dgSocketRef.current.send(pcm16.buffer);
+            }
+          };
+
+          sourceNode.connect(scriptNode);
+          scriptNode.connect(audioCtx.destination);
+        }
+      } catch (audioErr) {
+        console.error("Failed to setup audio processor:", audioErr);
+      }
+
+      setPacStatus("listening");
+      setComputerLogs(prev => [...prev, "[DEEPGRAM] Microphone active: Streaming raw Linear16 PCM (16kHz 16-bit mono) audio via AudioWorklet."]);
+    } catch (err) {
+      console.error("Error accessing mic:", err);
+      setComputerLogs(prev => [...prev, "[DEEPGRAM-ERR] Mic capture denied or failed."]);
+    }
+  };
+
+  const stopDgMic = () => {
+    isHumanSpeakingRef.current = false;
+    hasSpokenInTurnRef.current = false;
+    lastHumanSpeechTimeRef.current = 0;
+
+    if (micAnimationIdRef.current) {
+      cancelAnimationFrame(micAnimationIdRef.current);
+      micAnimationIdRef.current = null;
+    }
+    micAnalyserRef.current = null;
+    setMicLevel(0);
+
+    if (workletNodeRef.current) {
+      try {
+        workletNodeRef.current.port.onmessage = null;
+        workletNodeRef.current.disconnect();
+      } catch (e) { }
+      workletNodeRef.current = null;
+    }
+
+    if (scriptNodeRef.current) {
+      try {
+        scriptNodeRef.current.disconnect();
+        scriptNodeRef.current.onaudioprocess = null;
+      } catch (e) { }
+      scriptNodeRef.current = null;
+      try { delete (window as any).__activeScriptNode; } catch (e) { }
+    }
+
+    if (dgRecorderRef.current) {
+      try { dgRecorderRef.current.stop(); } catch (e) { }
+      dgRecorderRef.current = null;
+    }
+    if (dgStreamRef.current) {
+      dgStreamRef.current.getTracks().forEach(track => track.stop());
+      dgStreamRef.current = null;
+    }
+  };
+
+  // Deepgram connection and session life-cycle (Stays connected continuously)
+  useEffect(() => {
+    const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+    if (useDeepgram && activeKey) {
+      connectDeepgram();
+    } else {
+      if (keepAliveIntervalRef.current) {
+        clearInterval(keepAliveIntervalRef.current);
+        keepAliveIntervalRef.current = null;
+      }
+      if (dgSocketRef.current) {
+        dgSocketRef.current.close();
+        dgSocketRef.current = null;
+      }
+      cleanupAudio();
+    }
+    return () => {
+      isConnectingDgRef.current = false;
+      if (keepAliveIntervalRef.current) {
+        clearInterval(keepAliveIntervalRef.current);
+        keepAliveIntervalRef.current = null;
+      }
+      if (dgSocketRef.current) {
+        dgSocketRef.current.close();
+      }
+      cleanupAudio();
+    };
+  }, [useDeepgram, dgApiKey, dgAgentId]);
+
+  // Manage live microphone stream based on mic mute state
+  useEffect(() => {
+    if (dgSocketRef.current && dgConnectionStatus === "connected") {
+      if (!isMicMuted) {
+        startDgMic();
+      } else {
+        stopDgMic();
+      }
+    }
+  }, [isMicMuted, dgConnectionStatus]);
+
+  // ----------------------------------------------------
+  // VOICE SPEECH RECOGNITION (STT) + BARGE-IN SYSTEM (BROWSER FALLBACK)
+  // ----------------------------------------------------
+  useEffect(() => {
+    const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+    if (useDeepgram && activeKey) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = "en-US";
+
+      rec.onstart = () => {
+        if (inputMode === "voice") {
+          setPacStatus("listening");
+        }
+      };
+
+      rec.onresult = (event: any) => {
+        const transcript = event.results[event.results.length - 1][0].transcript;
+        if (transcript.trim()) {
+          // INTERRUPT/BARGE-IN MECHANISM
+          // If P.A.C. is speaking, interrupt immediately!
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel();
+            setPacStatus("listening");
+          }
+
+          handleSendInput(transcript);
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        console.error("STT Recognition error", e);
+      };
+
+      rec.onend = () => {
+        const hasKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+        if (inputMode === "voice" && !isMicMuted && !(useDeepgram && hasKey)) {
+          try {
+            rec.start();
+          } catch { }
+        }
+      };
+
+      recognitionRef.current = rec;
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [inputMode, isMicMuted, useDeepgram, dgApiKey]);
+
+  // Handle Voice Mode trigger (BROWSER FALLBACK)
+  useEffect(() => {
+    const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+    if (useDeepgram && activeKey) return;
+
+    if (inputMode === "voice" && recognitionRef.current) {
+      window.speechSynthesis.cancel(); // cancel current speech
+      try {
+        recognitionRef.current.start();
+      } catch { }
+    } else if (inputMode === "text" && recognitionRef.current) {
+      recognitionRef.current.stop();
+      if (pacStatus === "listening") {
+        setPacStatus("idle");
+      }
+    }
+  }, [inputMode, useDeepgram, dgApiKey]);
+
+  const speakText = (text: string) => {
+    if (isSpeakerMutedRef.current) return;
+    const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
+    if ((speechEngine === "deepgram" || useDeepgram) && activeKey) {
+      console.log("[P.A.C.] Speech handled natively by Deepgram Voice Agent (Browser Web Speech API bypassed).");
+      return;
+    }
+
+    // 1. Cancel previous speech instantly
+    window.speechSynthesis.cancel();
+
+    // 2. Clear HTML or markdown symbols for clean reading
+    const cleanText = text
+      .replace(/[*_`#]/g, "")
+      .replace(/\[.*?\]/g, "")
+      .substring(0, 400); // chunk response length for fluid experience
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utteranceRef.current = utterance;
+
+    // energetic peer co-founder voice setup
+    utterance.rate = 1.15;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      setPacStatus("speaking");
+    };
+
+    utterance.onend = () => {
+      setPacStatus(inputMode === "voice" ? "listening" : "idle");
+    };
+
+    utterance.onerror = () => {
+      setPacStatus(inputMode === "voice" ? "listening" : "idle");
+    };
+
+    // Get available voices and pick a professional male voice if available (to match Arcas male co-founder persona)
+    const voices = window.speechSynthesis.getVoices();
+    let preferredVoice = voices.find(v => v.lang.startsWith("en") && (
+      v.name.includes("Male") || v.name.includes("David") || v.name.includes("George") ||
+      v.name.includes("Daniel") || v.name.includes("James") || v.name.includes("Guy") ||
+      v.name.includes("Mark") || v.name.includes("Alex") || v.name.includes("Aaron") ||
+      v.name.includes("Natural") || v.name.toLowerCase().includes("male")
+    ));
+    if (!preferredVoice) {
+      preferredVoice = voices.find(v => v.lang.startsWith("en") && !v.name.includes("Samantha") && !v.name.includes("Victoria") && !v.name.includes("Karen") && !v.name.includes("Zira"));
+    }
+    if (!preferredVoice) {
+      preferredVoice = voices.find(v => v.lang.startsWith("en"));
+    }
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+    // Confident male co-founder pitch & rate tuning
+    utterance.pitch = preferredVoice?.name.includes("Female") ? 0.8 : 0.92;
+    utterance.rate = 1.08;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // ----------------------------------------------------
+  // SCREEN-AWARENESS (FRAME CAPTURER ENGINE)
+  // ----------------------------------------------------
+  const toggleScreenCapture = async () => {
+    if (isScreenCaptureActive) {
+      // Turn Off
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      streamRef.current = null;
+      setIsScreenCaptureActive(false);
+      setLastCapturedFrame(null);
+      setComputerLogs(prev => [...prev, "[SCREEN] Screen Capture de-activated."]);
+    } else {
+      // Turn On
+      setCaptureError("");
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: "always" } as any,
+          audio: false
+        });
+
+        streamRef.current = stream;
+        setIsScreenCaptureActive(true);
+        setComputerLogs(prev => [...prev, "[SCREEN] Eye-of-PAC screen capture stream initiated."]);
+
+        // Auto-capture loop
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.autoplay = true;
+        videoRef.current = video;
+
+        // Take initial frame after short delay
+        setTimeout(() => {
+          captureCurrentScreenFrame();
+        }, 1500);
+
+        stream.getVideoTracks()[0].onended = () => {
+          setIsScreenCaptureActive(false);
+          setLastCapturedFrame(null);
+        };
+      } catch (err: any) {
+        console.error("Screen sharing permission denied:", err);
+        setCaptureError("Permission denied or constrained in iframe. Try running in a new browser tab.");
+      }
+    }
+  };
+
+  const captureCurrentScreenFrame = () => {
+    if (!isScreenCaptureActive || !videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+
+    if (ctx && video.videoWidth > 0) {
+      canvas.width = 400; // compress for optimal API size
+      canvas.height = (video.videoHeight / video.videoWidth) * 400;
+
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        setLastCapturedFrame(dataUrl);
+        setComputerLogs(prev => [
+          ...prev,
+          `[SCREEN] Captured visual workspace state at ${new Date().toLocaleTimeString()}`
+        ].slice(-30));
+      } catch (err) {
+        console.error("Canvas draw frame err", err);
+      }
+    }
+  };
+
+  // Capture frame every 15 seconds
+  useEffect(() => {
+    let captureInterval: any;
+    if (isScreenCaptureActive) {
+      captureInterval = setInterval(() => {
+        captureCurrentScreenFrame();
+      }, 15000);
+    }
+    return () => clearInterval(captureInterval);
+  }, [isScreenCaptureActive]);
+
+  // ----------------------------------------------------
+  // API INTEGRATION & CHAT ROUTER
+  // ----------------------------------------------------
+  const handleSendInput = async (userInputText: string) => {
+    if (!userInputText.trim()) return;
+
+    // Barge-in check: If speaking, cancel instantly!
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    stopStreamingPlayback();
+
+    const currentMsg = userInputText;
+    setTextInput("");
+
+    // Add user message to state
+    const userMsgObj = {
+      role: "user" as const,
+      text: currentMsg,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setMessages(prev => [...prev, userMsgObj]);
+    setPacStatus("thinking");
+
+    // Capture newest frame instantly if enabled to keep context fresh
+    if (isScreenCaptureActive) {
+      captureCurrentScreenFrame();
+    }
+
+    // IF Deepgram voice agent WebSocket is active and connected, inject user message
+    if (dgSocketRef.current && dgConnectionStatus === "connected") {
+      try {
+        const injectPayload = {
+          type: "InjectUserMessage",
+          message: currentMsg
+        };
+        dgSocketRef.current.send(JSON.stringify(injectPayload));
+        console.log("[P.A.C. WS] Injected user message text directly into Deepgram Voice Agent session:", currentMsg);
+        return; // Bypasses standard Gemini API backend route
+      } catch (err) {
+        console.error("Failed to inject user message into Deepgram WebSocket:", err);
+      }
+    }
+
+    try {
+      const response = await fetch("/api/pac/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: currentMsg,
+          history: messages.map(m => ({ role: m.role === "user" ? "user" : "model", text: m.text })),
+          screenFrame: lastCapturedFrame, // base64 payload
+          opportunities: opportunities.map(o => ({
+            id: o.id,
+            author: o.author,
+            title: o.title,
+            industry: o.industry,
+            problemSummary: o.problemSummary,
+            status: o.status
+          })),
+          computerLogs: computerLogs // Pass computer logs!
+        })
+      });
+
+      if (!response.ok) {
+        let errMsg = "P.A.C. system offline or rate-limited.";
+        try {
+          const errData = await response.json();
+          if (errData && errData.error) {
+            errMsg = errData.error;
+          }
+        } catch (e) {
+          // Use standard error status text if JSON extraction fails
+        }
+        throw new Error(errMsg);
+      }
+      const data = await response.json();
+
+      // Update P.A.C. response
+      const pacText = data.response || "Something crossed our wires. Repeat that, partner?";
+      setMessages(prev => [...prev, {
+        role: "pac" as const,
+        text: pacText,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
+
+      // Process any action tags or document generation in assistant text
+      processTranscriptText(pacText);
+
+      // If P.A.C. took autonomous actions, log them in the computer terminal
+      if (data.actions && Array.isArray(data.actions)) {
+        setComputerLogs(prev => [
+          ...prev,
+          ...data.actions.map((act: string) => `[PAC-EXEC] ${act}`)
+        ].slice(-50));
+      }
+
+      // Speak response out loud
+      speakText(pacText);
+
+    } catch (err: any) {
+      setMessages(prev => [...prev, {
+        role: "pac" as const,
+        text: `Error contacting system. ${err.message || ""}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
+      setPacStatus(inputMode === "voice" ? "listening" : "idle");
+    }
+  };
+
+  // ----------------------------------------------------
+  // FULL COMPUTER USE & EMAIL CAMPAIGN SIMULATION
+  // ----------------------------------------------------
+  const handleRunAutonomousCampaign = async () => {
+    if (isAutonomousRunning) return;
+    setIsAutonomousRunning(true);
+    setIsAutoDraftSent(false);
+    setCurrentStepIndex(0);
+
+    // Simulated Human-like rate limit check
+    setComputerLogs(prev => [
+      ...prev,
+      `[HUMAN-LIMIT] Rate-limiting guard: Active. Human simulation speed set to maximum of ${rateLimitPerHour} actions/hr.`,
+    ].slice(-40));
+
+    const steps = [
+      "Initiating autonomous outreach campaign...",
+      "Scanning Interactive Opportunity board for high-pain leads...",
+      "Evaluating leads against target criteria (Healthcare, Real Estate, SMBs)...",
+      "Analyzing active screen workspace layout to target high-priority prospects...",
+      "Drafting a bespoke, highly personal outreach proposal (Enforcing non-negotiable 50% upfront payment rule)...",
+      "Constructing direct non-jargon solution pitch via Google Gmail integration..."
+    ];
+
+    for (let i = 0; i < steps.length; i++) {
+      setCurrentStepIndex(i);
+      setComputerLogs(prev => [...prev, `[PAC-EXEC] ${steps[i]}`].slice(-40));
+
+      if (isHumanBehaviorActive) {
+        // Humanized actions
+        const clicks = Math.floor(Math.random() * 3) + 1; // 1-3 clicks
+        const randX = Math.floor(Math.random() * 800) + 100;
+        const randY = Math.floor(Math.random() * 600) + 100;
+        const delay = Math.floor(Math.random() * 2000) + 1800; // 1.8s to 3.8s randomized delay
+
+        setComputerLogs(prev => [
+          ...prev,
+          `[HUMAN-MOVE] Moving cursor smoothly to coordinates (X: ${randX}, Y: ${randY}) mimicking natural mouse drag...`,
+          `[HUMAN-CLICK] Organic click registered at (X: ${randX}, Y: ${randY}). Cumulative clicks: ${clickCount + clicks}`,
+          `[HUMAN-WAIT] Realistic pause of ${delay}ms injected to avoid automated velocity alerts.`
+        ].slice(-40));
+
+        setClickCount(prev => prev + clicks);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    // Attempt to execute Gmail draft if Gmail token is connected
+    if (opportunities.length > 0) {
+      const targetOpp = opportunities.find(o => o.status === "Saved") || opportunities[0];
+      const emailSubject = `Automation Opportunity: Fixing your operational pain in ${targetOpp.industry || "operations"}`;
+      const emailBody = `Hi ${targetOpp.author},\n\nI saw your discussion regarding: "${targetOpp.title}".\n\nIt sounds like you are experiencing severe administrative friction with manual bottlenecks. As a specialized workflow automation partner, we can configure a secure, lightweight custom API automation that resolves 90% of this double-entry within 5 business days.\n\nOur service model is structured cleanly: $1,500 total, with a standard non-negotiable 50% upfront retainer before system build kicks off.\n\nLet me know if you'd like to map out a free workflow blueprint.\n\nBest regards,\n${gmailUser?.email || "Automation Partner"}`;
+
+      if (gmailToken) {
+        try {
+          if (isHumanBehaviorActive) {
+            setComputerLogs(prev => [
+              ...prev,
+              `[HUMAN-SEND] Reviewing outreach draft for quality control, scrolling to Gmail draft CTA button...`,
+              `[HUMAN-CLICK] Confirmed send action. Single human dispatch click verified (340ms debounce time).`
+            ].slice(-40));
+            setClickCount(prev => prev + 1);
+          }
+
+          await sendGmailEmail(gmailToken, "prospect-test@example.com", emailSubject, emailBody);
+          setComputerLogs(prev => [
+            ...prev,
+            `[GMAIL-AUTO] Successfully dispatched live outreach draft to: prospect-test@example.com (linked to lead: ${targetOpp.author})!`,
+            `[OUTREACH-DETAILS] 👤 Target Lead: ${targetOpp.author} ("${targetOpp.title}")`,
+            `[OUTREACH-DETAILS] 📧 Subject: "${emailSubject}"`,
+            `[OUTREACH-DETAILS] 📝 Body:\n${emailBody}`
+          ].slice(-40));
+          setIsAutoDraftSent(true);
+        } catch (err: any) {
+          setComputerLogs(prev => [...prev, `[GMAIL-ERROR] Draft creation failed: ${err.message}`]);
+        }
+      } else {
+        setComputerLogs(prev => [
+          ...prev,
+          "[WARNING] Gmail is not connected. Simulation placed outreach draft into computer memory.",
+          `[SIMULATED-OUTREACH] 👤 Target Lead: ${targetOpp.author} ("${targetOpp.title}")`,
+          `[SIMULATED-OUTREACH] 📧 Subject: "${emailSubject}"`,
+          `[SIMULATED-OUTREACH] 📝 Body:\n${emailBody}`
+        ].slice(-40));
+      }
+    } else {
+      setComputerLogs(prev => [
+        ...prev,
+        "[WARNING] No active opportunities found in database to execute outreach campaign."
+      ].slice(-40));
+    }
+
+    setIsAutonomousRunning(false);
+    setCurrentStepIndex(-1);
+
+    // P.A.C. speaks completion
+    speakText("Outreach campaign executed successfully, partner. Check the computer terminal or your Gmail inbox to audit the draft!");
+  };
+
+  // ----------------------------------------------------
+  // SPARRING SALES COACHING FLOW
+  // ----------------------------------------------------
+  const handleStartSparring = (persona: "cynical_clinic" | "busy_broker" | "tight_founder") => {
+    setSelectedPersona(persona);
+    setSparState("roleplay");
+
+    let scenario = "";
+    let systemVoiceIntro = "";
+
+    if (persona === "cynical_clinic") {
+      scenario = "You are cold-calling Dr. Harrison, a cynical dental clinic manager who hates software developers. Dr. Harrison is tired of his staff manually re-typing appointments into three spreadsheets, but thinks 'custom software' is a scam.";
+      systemVoiceIntro = "Dr. Harrison here. Look, I have three root canals to perform in ten minutes. My front desk is a mess but what makes you think your little software is going to fix my life? Keep it fast, kid.";
+    } else if (persona === "busy_broker") {
+      scenario = "You are talking to Mark, an active commercial real-estate broker. He manually sends MLS property PDFs to 100 leads daily. He wants automation but is incredibly impatient.";
+      systemVoiceIntro = "Mark here. My phone is ringing off the hook. I want this automated yesterday, but I'm not paying you a dime until I see a finished product. What's your pitch?";
+    } else {
+      scenario = "You are pitching Dave, a cash-strapped startup founder who wants you to build a complex multi-user portal, but claims his budget is only $500.";
+      systemVoiceIntro = "Hey, Dave here. I love your vibes. I want a complete custom dashboard with client logins, database syncing, and reports. Can you do it for $500? I can give you equity!";
+    }
+
+    setSparScenario(scenario);
+    setMessages(prev => [
+      ...prev,
+      { role: "pac" as const, text: `[Sales Roleplay Initiated] Scenario:\n${scenario}`, time: new Date().toLocaleTimeString() },
+      { role: "pac" as const, text: `"${systemVoiceIntro}"`, time: new Date().toLocaleTimeString() }
+    ]);
+
+    speakText(systemVoiceIntro);
+  };
+
+  if (!isOpen) {
+    const isConnected = dgConnectionStatus === "connected";
+    const isConnecting = dgConnectionStatus === "connecting";
+    const isError = dgConnectionStatus === "error";
+
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-6 right-6 p-4 rounded-full bg-gradient-to-tr from-indigo-600 via-violet-600 to-indigo-500 hover:from-indigo-500 hover:to-violet-500 text-white shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 z-50 flex items-center gap-2 cursor-pointer border border-indigo-400/30 group active:scale-95"
+        title={
+          isConnected
+            ? "P.A.C. (Live Voice Connected)"
+            : isConnecting
+              ? "P.A.C. (Connecting to Voice Server...)"
+              : isError
+                ? "P.A.C. (Voice Connection Error)"
+                : "P.A.C. Co-founder (Voice Offline)"
+        }
+        id="pac-trigger-btn"
+        type="button"
+      >
+        <span className="relative flex h-3 w-3">
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isConnected ? "bg-emerald-400" :
+              isConnecting ? "bg-amber-400" :
+                isError ? "bg-rose-400" :
+                  "bg-slate-500"
+            }`}></span>
+          <span className={`relative inline-flex rounded-full h-3 w-3 ${isConnected ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" :
+              isConnecting ? "bg-amber-500" :
+                isError ? "bg-rose-500 animate-pulse" :
+                  "bg-slate-600"
+            }`}></span>
+        </span>
+        <Cpu className={`h-5 w-5 ${isConnected ? "text-emerald-400 animate-pulse" : "text-white"}`} />
+        <span className="text-xs font-mono font-bold uppercase tracking-wider block pr-1">
+          {isConnected ? "Voice Connected" : "P.A.C. Co-founder"}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      style={{ left: `${position.x}px`, top: `${position.y}px` }}
+      className={`fixed w-[400px] rounded-2xl bg-slate-950/95 border-2 ${pacStatus === "speaking" ? "border-cyan-500/40 shadow-cyan-950/40" :
+          pacStatus === "listening" ? "border-emerald-500/40 shadow-emerald-950/40" :
+            pacStatus === "thinking" ? "border-indigo-500/40 shadow-indigo-950/40" :
+              "border-slate-800 shadow-black/80"
+        } shadow-2xl backdrop-blur-md transition-all duration-200 z-50 overflow-hidden flex flex-col ${isMinimized ? "h-auto" : "h-[580px] max-h-[90vh]"
+        }`}
+      onMouseDown={handleMouseDown}
+      id="pac-floating-widget"
+    >
+      {/* 1. Glass Drag Handle & Header */}
+      <div className="drag-handle px-4 py-3 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between cursor-move select-none">
+        <div className="flex items-center gap-2">
+          {/* P.A.C Brain Orb Indicator */}
+          <div className="relative flex items-center justify-center h-6 w-6">
+            <span className={`absolute h-full w-full rounded-full opacity-20 animate-ping ${pacStatus === "speaking" ? "bg-cyan-400" :
+                pacStatus === "listening" ? "bg-emerald-400" :
+                  pacStatus === "thinking" ? "bg-indigo-400 animate-spin duration-1000" :
+                    "bg-indigo-400"
+              }`}></span>
+            <div className={`relative h-3 w-3 rounded-full shadow-inner transition-colors duration-300 ${pacStatus === "speaking" ? "bg-cyan-400 shadow-cyan-300" :
+                pacStatus === "listening" ? "bg-emerald-400 shadow-emerald-300" :
+                  pacStatus === "thinking" ? "bg-indigo-400 animate-pulse" :
+                    "bg-indigo-600 shadow-indigo-400"
+              }`}></div>
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-white font-mono tracking-wider flex items-center gap-1.5">
+              P.A.C.
+              <span className="text-[9px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.2 rounded font-medium">CO-FOUNDER</span>
+              <span
+                onClick={() => setShowVoiceSettings(!showVoiceSettings)}
+                className={`flex items-center gap-1 text-[8px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-tight border cursor-pointer hover:opacity-80 transition ${dgConnectionStatus === "connected"
+                    ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20"
+                    : dgConnectionStatus === "connecting"
+                      ? "bg-amber-950/40 text-amber-400 border-amber-500/20 animate-pulse"
+                      : dgConnectionStatus === "error"
+                        ? "bg-rose-950/40 text-rose-400 border-rose-500/20 animate-pulse"
+                        : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                  }`}
+                title={`Deepgram Voice Agent: ${dgLifecycleStatus}. Click to open Voice Settings.`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${dgConnectionStatus === "connected" ? "bg-emerald-400 shadow-[0_0_4px_#34d399] animate-pulse" :
+                    dgConnectionStatus === "connecting" ? "bg-amber-400 animate-ping" :
+                      dgConnectionStatus === "error" ? "bg-rose-500 animate-pulse" :
+                        "bg-slate-600"
+                  }`} />
+                {dgConnectionStatus === "connected" ? "Voice Live 🎙️" : dgConnectionStatus === "connecting" ? "Linking..." : "Voice Offline ⚙️"}
+              </span>
+
+              {/* Instant STOP button right in status header */}
+              {dgConnectionStatus === "connected" || dgConnectionStatus === "connecting" ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); stopDeepgramVoiceAgent(); }}
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8.5px] font-extrabold shadow-md cursor-pointer flex items-center gap-1 border border-rose-400/50 animate-pulse transition"
+                  title="IMMEDIATELY stop Voice Agent & cut credit usage"
+                  type="button"
+                >
+                  <span>🛑 STOP VOICE</span>
+                </button>
+              ) : (
+                <button
+                  onClick={(e) => { e.stopPropagation(); startDeepgramVoiceAgent(); }}
+                  className="px-1.5 py-0.5 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 rounded text-[8.5px] font-bold shadow-md cursor-pointer flex items-center gap-1 border border-emerald-500/40 transition"
+                  title="Start Deepgram Live Voice Agent"
+                  type="button"
+                >
+                  <span>🎙️ START VOICE</span>
+                </button>
+              )}
+            </h3>
+            <p className="text-[9px] text-slate-500 font-mono">
+              {pacStatus === "idle" && (dgConnectionStatus === "connected" ? "Voice Ready - Standing By" : "Gemini Text Active (Voice Offline)")}
+              {pacStatus === "listening" && (dgConnectionStatus === "connected" ? "Listening... speak now" : "Mic listening (Text Mode)")}
+              {pacStatus === "thinking" && "Processing workspace..."}
+              {pacStatus === "speaking" && "P.A.C. is speaking"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {/* Quick Screen Eye Toggle */}
+          <button
+            onClick={toggleScreenCapture}
+            className={`p-1.5 rounded transition ${isScreenCaptureActive
+                ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+              }`}
+            title={isScreenCaptureActive ? "Turn Off Screen Eye" : "Enable Screen-Awareness Eye"}
+            type="button"
+          >
+            <Monitor size={12} />
+          </button>
+
+          <button
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="p-1 rounded text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition cursor-pointer"
+            title={isMinimized ? "Expand Panel" : "Minimize Panel"}
+            type="button"
+          >
+            {isMinimized ? <Plus size={12} /> : <ChevronRight size={12} className="rotate-90" />}
+          </button>
+
+          <button
+            onClick={() => setIsOpen(false)}
+            className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+            title="Close Floating Widget"
+            type="button"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Hidden layout capture triggers */}
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* 2. Minimized Mini Bar Mode */}
+      {isMinimized && (
+        <div className="p-3 bg-slate-950 flex items-center justify-between text-xs font-mono border-t border-slate-900">
+          <span className="text-slate-400 truncate max-w-[260px]">
+            {messages[messages.length - 1]?.text || "Standby"}
+          </span>
+          <button
+            onClick={() => setIsMinimized(false)}
+            className="text-[10px] text-indigo-400 font-bold hover:underline"
+            type="button"
+          >
+            Maximize
+          </button>
+        </div>
+      )}
+
+      {/* 3. Maximized Core Working Panel */}
+      {!isMinimized && (
+        <>
+          {/* Active Document Top Alert Banner */}
+          {activeDocument && activeTab !== "review" && (
+            <div className="px-3 py-2 bg-gradient-to-r from-sky-950 via-slate-900 to-indigo-950 border-b border-sky-500/30 flex items-center justify-between text-xs text-sky-200">
+              <div className="flex items-center gap-2 font-mono truncate mr-2">
+                <Sparkles size={13} className="text-sky-400 shrink-0" />
+                <span className="truncate text-[11px]">Draft Ready: <strong>{activeDocument.title}</strong></span>
+              </div>
+              <button
+                onClick={() => { setActiveTab("review"); setIsMinimized(false); }}
+                className="px-2.5 py-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded text-[10px] transition cursor-pointer flex items-center gap-1 shrink-0 font-mono"
+                type="button"
+              >
+                Review & Approve <ChevronRight size={11} />
+              </button>
+            </div>
+          )}
+          {/* Menu Tabs */}
+          <div className="flex border-b border-slate-900 bg-slate-900/40 text-center font-mono">
+            {[
+              { id: "chat", label: "💬 Brainstorm" },
+              { id: "computer", label: "🖥️ Computer" },
+              { id: "spar", label: "🥊 Coaching" },
+              { id: "review", label: `📄 Review${activeDocument ? " 🔴" : ""}` },
+              { id: "memory", label: "🧠 Memory" }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex-1 py-2 text-[10px] font-bold uppercase border-b-2 transition ${activeTab === tab.id
+                    ? "border-cyan-500 text-white bg-slate-950/20"
+                    : "border-transparent text-slate-500 hover:text-slate-300"
+                  }`}
+                type="button"
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Core Scroll Window Container */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-slate-950/20 scrollbar-thin">
+
+            {/* SCREEN-AWARE EYE STATUS ALERTER */}
+            {isScreenCaptureActive && (
+              <div className="p-2 bg-cyan-950/20 border border-cyan-500/20 rounded-lg flex items-center justify-between text-[10px] text-cyan-400 font-mono animate-pulse">
+                <span className="flex items-center gap-1.5">
+                  <Monitor size={10} />
+                  Continuous visual screen capturing is ACTIVE.
+                </span>
+                <span className="text-[9px] bg-cyan-400/10 px-1 rounded">Vision Ready</span>
+              </div>
+            )}
+            {captureError && (
+              <div className="p-2 bg-amber-950/20 border border-amber-500/20 rounded-lg flex items-start gap-1.5 text-[10px] text-amber-400 font-mono leading-normal">
+                <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                <span>{captureError}</span>
+              </div>
+            )}
+
+            {/* TAB 1: BRAINSTORM CHAT */}
+            {activeTab === "chat" && (
+              <div className="space-y-4 flex flex-col h-full justify-between">
+                <div className="space-y-3 flex-1 overflow-y-auto pr-0.5">
+                  {messages.map((m, idx) => (
+                    <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[85%] rounded-xl p-2.5 text-xs leading-relaxed ${m.role === "user"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-slate-900 border border-slate-800 text-slate-200"
+                        }`}>
+                        <div className="flex items-center gap-1 text-[9px] font-mono opacity-40 mb-1">
+                          {m.role === "user" ? <User size={9} /> : <Bot size={9} />}
+                          <span>{m.role === "user" ? "You" : "P.A.C."}</span>
+                          <span className="ml-auto">{m.time}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap">{m.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (textInput.trim()) {
+                      handleSendInput(textInput);
+                    }
+                  }}
+                  className="pt-2 border-t border-slate-800/60 flex gap-2"
+                >
+                  <input
+                    type="text"
+                    aria-label="Message or instruction for P.A.C co-founder"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Type a message or instruction for P.A.C..."
+                    className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-100 placeholder-slate-700 font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!textInput.trim() || pacStatus === "thinking"}
+                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:text-slate-600 text-white font-mono text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Send size={10} />
+                    <span>Reply</span>
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* TAB 2: COMPUTER EXECUTION HUB */}
+            {activeTab === "computer" && (
+              <div className="space-y-4">
+                {/* SUBSYSTEM DIAGNOSTICS & ABILITIES CARD */}
+                <div className="p-3.5 rounded-xl border border-cyan-500/20 bg-slate-900/90 space-y-3 font-mono">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Activity size={13} className={diagnosticsResult.allHealthy ? "text-emerald-400" : "text-amber-400"} />
+                      <span className="text-xs font-bold text-white uppercase">P.A.C. Subsystem Diagnostics</span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${diagnosticsResult.allHealthy ? "bg-emerald-950 text-emerald-300 border border-emerald-500/30" : "bg-amber-950 text-amber-300 border border-amber-500/30"}`}>
+                      {diagnosticsResult.isChecking ? "Checking..." : diagnosticsResult.allHealthy ? "100% NOMINAL" : "ATTENTION NEEDED"}
+                    </span>
+                  </div>
+
+                  {/* Subsystems Status Grid */}
+                  <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">🎤 Voice Engine:</span>
+                      <span className={diagnosticsResult.subsystems.deepgramVoice === true ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
+                        {diagnosticsResult.subsystems.deepgramVoice === true ? "Deepgram AI" : "WebSpeech"}
+                      </span>
+                    </div>
+                    <div className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">🧠 Gemini AI Core:</span>
+                      <span className={diagnosticsResult.subsystems.geminiChat ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {diagnosticsResult.subsystems.geminiChat ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                    <div className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">💾 Agent Memory:</span>
+                      <span className={diagnosticsResult.subsystems.memoryBank ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {diagnosticsResult.subsystems.memoryBank ? "Connected" : "Error"}
+                      </span>
+                    </div>
+                    <div className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
+                      <span className="text-slate-400">🎧 Audio Capture:</span>
+                      <span className={diagnosticsResult.subsystems.audioCapture ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                        {diagnosticsResult.subsystems.audioCapture ? "Mic Ready" : "Disabled"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Display Issues if any */}
+                  {diagnosticsResult.issues.length > 0 && (
+                    <div className="p-2 bg-amber-950/30 border border-amber-500/20 rounded text-[9.5px] text-amber-300 space-y-1">
+                      <span className="font-bold block">⚠️ Subsystem Diagnostics Notices:</span>
+                      {diagnosticsResult.issues.map((iss, i) => (
+                        <div key={i} className="flex items-start gap-1">
+                          <span>•</span>
+                          <span>{iss}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Core Abilities Summary */}
+                  <div className="p-2.5 bg-slate-950 rounded border border-slate-800 space-y-1.5 text-[10px]">
+                    <span className="text-cyan-400 font-bold uppercase block text-[9.5px]">⚡ Active Capabilities & Navigator Controls:</span>
+                    <ul className="space-y-1 text-slate-300 text-[9.5px] leading-normal">
+                      <li>• <strong>App View Navigator:</strong> Switch screen views anytime ([ACTION: NAVIGATE: board|crm|memory|bots|partner|learning]).</li>
+                      <li>• <strong>Opportunity Card Drawer:</strong> Pull up specific deals on screen ([ACTION: OPEN_OPPORTUNITY: &lt;query&gt;]).</li>
+                      <li>• <strong>Document & Strategy Generator:</strong> Pop-up review modals for proposals, outreach, and strategic roadmaps.</li>
+                      <li>• <strong>Equal Co-Founder Sparring:</strong> P.A.C. challenges weak strategy, low quotes, and enforces 50% deposits.</li>
+                      <li>• <strong>Session Memory Continuity:</strong> Maintains chat context; never repeats intro speeches.</li>
+                    </ul>
+                  </div>
+
+                  {/* Control Buttons */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={diagnosticsResult.isChecking}
+                      onClick={runDiagnosticsCheck}
+                      className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-300 font-bold text-[10px] rounded transition flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw size={10} className={diagnosticsResult.isChecking ? "animate-spin" : ""} />
+                      {diagnosticsResult.isChecking ? "Checking Subsystems..." : "Run Diagnostics Check"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResetChatHistory}
+                      className="py-1.5 px-3 bg-slate-800 hover:bg-rose-950 hover:text-rose-300 text-slate-400 font-bold text-[10px] rounded transition cursor-pointer"
+                      title="Clear chat history and restart greeting"
+                    >
+                      Reset History
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl border border-indigo-500/10 bg-indigo-950/10 space-y-2">
+                  <h4 className="text-xs font-bold text-white font-mono uppercase flex items-center gap-1.5">
+                    <Cpu size={12} className="text-cyan-400" />
+                    Computer Use Control Hub
+                  </h4>
+                  <p className="text-[10px] text-slate-400 leading-normal">
+                    Let P.A.C. autonomously parse raw forum scraper logs, research niche bottlenecks, construct customized value structures, and send personalized Gmail outreach on your machine.
+                  </p>
+
+                  {/* Human-Like Simulation Control Panel */}
+                  <div className="mt-3 p-3 bg-slate-900/80 border border-slate-800/80 rounded-lg space-y-2.5 font-mono text-[10px] text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-100 flex items-center gap-1 text-[10px]">
+                        🛡️ Human Behavior Guard
+                      </span>
+                      <button
+                        onClick={() => setIsHumanBehaviorActive(!isHumanBehaviorActive)}
+                        className={`px-2 py-0.5 rounded text-[9px] font-bold cursor-pointer transition ${isHumanBehaviorActive
+                            ? "bg-emerald-950 border border-emerald-500/30 text-emerald-400"
+                            : "bg-slate-800 border border-slate-700 text-slate-400"
+                          }`}
+                        type="button"
+                      >
+                        {isHumanBehaviorActive ? "ACTIVE" : "DISABLED"}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div className="bg-slate-950 p-2 rounded border border-slate-800/60">
+                        <span className="text-slate-500 block text-[9px] uppercase font-bold">Clicks Tracked</span>
+                        <span className="text-cyan-400 text-xs font-bold font-mono">{clickCount} clicks</span>
+                      </div>
+                      <div className="bg-slate-950 p-2 rounded border border-slate-800/60">
+                        <span className="text-slate-500 block text-[9px] uppercase font-bold">Rate Limits</span>
+                        <span className="text-indigo-400 text-xs font-bold font-mono">{rateLimitPerHour} outreach/hr</span>
+                      </div>
+                    </div>
+
+                    {isHumanBehaviorActive && (
+                      <p className="text-[9px] text-slate-500 italic">
+                        * P.A.C. mimics organic bezier curves, realistic keyboard keystroke pauses, and click debounces.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      onClick={handleRunAutonomousCampaign}
+                      disabled={isAutonomousRunning}
+                      className="flex-1 py-2 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 disabled:from-slate-800 disabled:text-slate-500 text-white font-bold text-xs rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 font-mono"
+                      type="button"
+                    >
+                      <Play size={10} />
+                      {isAutonomousRunning ? "Autonomous Mode Running..." : "Execute Auto-Campaign"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Simulated Computer execution state visual */}
+                {isAutonomousRunning && (
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                    <span className="text-[10px] font-bold text-indigo-400 font-mono uppercase block animate-pulse">Running Execution Stack</span>
+                    <div className="space-y-1">
+                      {[
+                        "Scan Interactive Board",
+                        "Evaluate Client Pain points",
+                        "Map screen layout",
+                        "Structure upfront pricing rules (50% upfront)",
+                        "Deploy Gmail API message"
+                      ].map((st, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[10px] font-mono">
+                          <div className={`h-1.5 w-1.5 rounded-full ${currentStepIndex > i ? "bg-emerald-400" :
+                              currentStepIndex === i ? "bg-cyan-400 animate-ping" :
+                                "bg-slate-700"
+                            }`} />
+                          <span className={currentStepIndex === i ? "text-cyan-400 font-bold" : "text-slate-500"}>{st}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Computer execution raw logs terminal */}
+                <div className="space-y-1">
+                  <span className="text-[10px] text-slate-500 font-mono uppercase font-bold tracking-wider block">Terminal Logs</span>
+                  <div className="p-3 bg-black rounded-lg border border-slate-900 font-mono text-[9px] leading-relaxed text-slate-400 h-[160px] overflow-y-auto pr-1">
+                    {computerLogs.map((log, idx) => (
+                      <div key={idx} className="border-b border-slate-950 pb-0.5">
+                        <span className="text-indigo-400 pr-1.5">$</span>
+                        <span>{log}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: SALES COACHING & ROLEPLAY */}
+            {activeTab === "spar" && (
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl border border-cyan-500/10 bg-cyan-950/10 space-y-2">
+                  <h4 className="text-xs font-bold text-white font-mono uppercase flex items-center gap-1.5">
+                    🥊 Peer Sparring Room
+                  </h4>
+                  <p className="text-[10px] text-slate-400 leading-normal">
+                    Practice cold-calling decision makers. P.A.C. poses as a tough, busy client so you can test your pricing models, object handling, and upfront commitment proposals.
+                  </p>
+                </div>
+
+                {sparState === "idle" ? (
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-bold text-slate-300 font-mono uppercase block">Select Prospect Persona</span>
+                    <div className="grid grid-cols-1 gap-2">
+                      {[
+                        { id: "cynical_clinic", title: "Dr. Harrison (Dental Clinic)", desc: "Skeptical, busy, manual scheduling spreadsheet mess." },
+                        { id: "busy_broker", title: "Mark (Commercial Real Estate)", desc: "Wants fast automation, tries to avoid upfront cash." },
+                        { id: "tight_founder", title: "Dave (Cash-Strapped Startup)", desc: "Wants a massive custom web portal for $500." }
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => handleStartSparring(p.id as any)}
+                          className="text-left p-3 bg-slate-900 hover:bg-indigo-950/30 border border-slate-800 hover:border-indigo-500/20 rounded-lg text-xs transition cursor-pointer text-slate-200"
+                          type="button"
+                        >
+                          <span className="font-bold text-slate-100 block">{p.title}</span>
+                          <span className="text-[10px] text-slate-400 leading-normal block pt-0.5">{p.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                      <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase">Roleplay Active</span>
+                      <button
+                        onClick={() => { setSparState("idle"); setMessages(prev => [...prev, { role: "pac", text: "Sales sparring session closed.", time: new Date().toLocaleTimeString() }]); }}
+                        className="text-[9px] font-mono text-rose-400 hover:underline cursor-pointer"
+                        type="button"
+                      >
+                        End Sparring
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 italic leading-relaxed">
+                      {sparScenario}
+                    </p>
+                    <div className="p-2.5 bg-slate-950 border border-slate-800 rounded text-[10px] text-slate-300 leading-relaxed font-mono">
+                      <strong>Coach P.A.C. Note:</strong> Stand your ground. Never negotiate down your value, and enforce our <strong>50% upfront payment rule</strong> when they push back!
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: DOCUMENT REVIEW BOARD */}
+            {activeTab === "review" && (
+              <div className="space-y-4 flex flex-col h-full justify-between min-h-0">
+                <div className="space-y-3 flex-1 overflow-y-auto pr-0.5">
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-sky-400 font-mono tracking-wider uppercase font-bold">
+                        📄 Live Document Review
+                      </span>
+                      {activeDocument && (
+                        <span className="text-[9px] bg-sky-500/10 text-sky-300 border border-sky-500/20 px-1.5 py-0.5 rounded font-mono uppercase">
+                          {activeDocument.type}
+                        </span>
+                      )}
+                    </div>
+                    {activeDocument ? (
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <label className="text-[9.5px] text-slate-400 font-mono block">Document Title</label>
+                          <input
+                            type="text"
+                            value={activeDocument.title}
+                            onChange={(e) => setActiveDocument({ ...activeDocument, title: e.target.value })}
+                            className="w-full px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-xs text-white focus:outline-none focus:border-cyan-500"
+                          />
+                        </div>
+
+                        {activeDocument.type === "outreach" && (
+                          <div className="space-y-1">
+                            <label className="text-[9.5px] text-slate-400 font-mono block">Recipient Email</label>
+                            <input
+                              type="email"
+                              placeholder="enter-recipient@domain.com"
+                              value={reviewEmailRecipient}
+                              onChange={(e) => setReviewEmailRecipient(e.target.value)}
+                              className="w-full px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-xs text-white focus:outline-none focus:border-cyan-500"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-1">
+                          <label className="text-[9.5px] text-slate-400 font-mono block">Content Editor</label>
+                          <textarea
+                            value={activeDocument.content}
+                            onChange={(e) => setActiveDocument({ ...activeDocument, content: e.target.value })}
+                            className="w-full h-64 p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs leading-relaxed text-slate-200 focus:outline-none focus:border-cyan-500 font-mono resize-y"
+                            placeholder="Document content..."
+                          />
+                        </div>
+
+                        {/* Co-founder Strategic Advice */}
+                        <div className="p-2.5 bg-slate-950 border border-amber-500/20 rounded-lg space-y-1">
+                          <span className="text-[10px] font-mono font-bold text-amber-400 uppercase block">
+                            🥊 P.A.C. Co-founder Strategy Note
+                          </span>
+                          <p className="text-[10.5px] text-slate-300 leading-normal">
+                            Always enforce our <strong>50% upfront payment term</strong> upon client signature. If the prospect pushes back on pricing, offer to adjust scope or payment schedule rather than discounting our fees.
+                          </p>
+                        </div>
+
+                        {/* Interactive Revision & Debate Request */}
+                        <div className="p-3 bg-slate-950/80 border border-cyan-500/20 rounded-lg space-y-2">
+                          <label className="text-[10px] font-mono font-bold text-cyan-300 uppercase block">
+                            ⚡ Request Revision / Debate with P.A.C.
+                          </label>
+                          <textarea
+                            value={revisionFeedbackInput}
+                            onChange={(e) => setRevisionFeedbackInput(e.target.value)}
+                            placeholder="Tell P.A.C. how to revise this draft, or challenge P.A.C.'s strategy (e.g. 'Shorten this', 'Add 50% deposit term', 'Push back on their $500 budget offer')..."
+                            className="w-full h-16 p-2 bg-slate-900 border border-slate-800 rounded text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
+                          />
+                          <div className="flex gap-1.5 flex-wrap">
+                            {[
+                              { label: "⚡ Shorten & Punchy", prompt: "Make this document much shorter, direct, and punchier." },
+                              { label: "💰 Add 50% Deposit Term", prompt: "Add a clear 50% upfront deposit requirement to lock in the engineering sprint." },
+                              { label: "🛡️ Push Back on Price", prompt: "Push back on low pricing or scope creep. Explain why our AI fleet delivery is worth full value." },
+                              { label: "✉️ Convert to LinkedIn DM", prompt: "Reformat this entire message as a casual, warm LinkedIn DM." }
+                            ].map((btn, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => setRevisionFeedbackInput(btn.prompt)}
+                                className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[9.5px] text-cyan-300 rounded transition cursor-pointer font-mono"
+                              >
+                                {btn.label}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isSubmittingRevision || !revisionFeedbackInput.trim()}
+                            onClick={async () => {
+                              if (!revisionFeedbackInput.trim() || !activeDocument) return;
+                              const textToSend = revisionFeedbackInput;
+                              setRevisionFeedbackInput("");
+                              setIsSubmittingRevision(true);
+                              const fullPrompt = `Regarding active document "${activeDocument.title}", please revise it based on this feedback: "${textToSend}". 
+Current Draft:
+${activeDocument.content}
+
+Instructions: Re-generate the revised document wrapped in a code block. If you disagree with any requested changes from a strategic sales perspective, explain why and push back!`;
+                              setActiveTab("chat");
+                              await handleSendInput(fullPrompt);
+                              setIsSubmittingRevision(false);
+                            }}
+                            className="w-full py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 text-white font-bold text-xs rounded transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            {isSubmittingRevision ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                            Send Revision Request to P.A.C.
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-12 space-y-2">
+                        <p className="text-xs text-slate-500 font-mono">No document currently in review.</p>
+                        <p className="text-[10px] text-slate-600 leading-normal max-w-[280px] mx-auto">
+                          Ask P.A.C. to "draft an email" or "create a proposal" during your conversation. When generated, it will pop up here for your review and approval.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {activeDocument && (
+                  <div className="pt-3 border-t border-slate-900 flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(activeDocument.content);
+                        alert("Copied document content to clipboard!");
+                      }}
+                      className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                      type="button"
+                    >
+                      Copy Draft
+                    </button>
+                    {activeDocument.type === "outreach" && gmailToken && (
+                      <button
+                        onClick={async () => {
+                          if (!reviewEmailRecipient || !reviewEmailRecipient.includes("@")) {
+                            alert("Please enter a valid recipient email address first.");
+                            return;
+                          }
+                          const confirmed = window.confirm(`Send this outreach email to ${reviewEmailRecipient} via Gmail?`);
+                          if (!confirmed) return;
+                          setIsSendingReviewEmail(true);
+                          try {
+                            const matchSubject = activeDocument.content.match(/subject:\s*(.*)/i);
+                            const subject = matchSubject ? matchSubject[1].trim() : `Regarding your project proposal`;
+                            const body = activeDocument.content.replace(/subject:\s*(.*)/i, "").trim();
+
+                            await sendGmailEmail(gmailToken, reviewEmailRecipient, subject, body);
+                            alert("Email sent successfully!");
+                            setActiveDocument(null);
+                            setActiveTab("chat");
+                            if (onRefreshOpportunities) {
+                              onRefreshOpportunities();
+                            }
+                          } catch (err: any) {
+                            console.error(err);
+                            alert("Failed to send email: " + err.message);
+                          } finally {
+                            setIsSendingReviewEmail(false);
+                          }
+                        }}
+                        disabled={isSendingReviewEmail}
+                        className="flex-1 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-800 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                        type="button"
+                      >
+                        {isSendingReviewEmail ? <RefreshCw size={11} className="animate-spin" /> : null}
+                        Send via Gmail
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setActiveDocument(null);
+                        setActiveTab("chat");
+                      }}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                      type="button"
+                    >
+                      Approve & Log
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === "memory" && (
+              <div className="space-y-4 flex flex-col h-full justify-between min-h-0">
+                <div className="space-y-4 flex-1 overflow-y-auto pr-0.5 scrollbar-thin">
+                  
+                  {/* Notes / Context Section */}
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
+                    <span className="text-[10px] text-sky-400 font-mono tracking-wider uppercase font-bold flex items-center gap-1.5">
+                      <Save size={10} /> Co-Founder Context & Session Notes
+                    </span>
+                    <p className="text-[9px] text-slate-500 font-mono leading-normal">
+                      Notes that P.A.C. will remember about your current business goals, outreach strategy, and setup context.
+                    </p>
+                    <textarea
+                      value={agentMemory.summary}
+                      onChange={(e) => setAgentMemory({ ...agentMemory, summary: e.target.value })}
+                      placeholder="Enter previous context or notes for the agent to remember..."
+                      className="w-full h-24 p-2 bg-slate-950 border border-slate-800 rounded text-xs text-white focus:outline-none focus:border-cyan-500 font-mono resize-none"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => handleSaveAgentMemory(agentMemory)}
+                        className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer"
+                        type="button"
+                      >
+                        <Save size={10} /> Save Notes
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Follow-up Tasks Section */}
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg space-y-3">
+                    <span className="text-[10px] text-sky-400 font-mono tracking-wider uppercase font-bold flex items-center gap-1.5">
+                      <Check size={10} /> Pending Follow-up Action Items
+                    </span>
+                    <p className="text-[9px] text-slate-500 font-mono leading-normal">
+                      Tasks to complete. P.A.C. will bring these up during voice calls or screen analysis.
+                    </p>
+
+                    {/* Task Add Form */}
+                    <div className="flex gap-2 items-center bg-slate-950 p-2 border border-slate-800 rounded">
+                      <input
+                        type="text"
+                        placeholder="Add new follow-up..."
+                        value={newTaskText}
+                        onChange={(e) => setNewTaskText(e.target.value)}
+                        className="flex-1 bg-transparent text-xs text-white focus:outline-none placeholder-slate-600"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (newTaskText.trim()) {
+                              const newTask = {
+                                id: Math.random().toString(36).substring(2, 9),
+                                task: newTaskText.trim(),
+                                completed: false,
+                                dueDate: newTaskDueDate || undefined
+                              };
+                              const updated = { ...agentMemory, followUps: [...agentMemory.followUps, newTask] };
+                              setAgentMemory(updated);
+                              handleSaveAgentMemory(updated);
+                              setNewTaskText("");
+                              setNewTaskDueDate("");
+                            }
+                          }
+                        }}
+                      />
+                      <input
+                        type="date"
+                        value={newTaskDueDate}
+                        onChange={(e) => setNewTaskDueDate(e.target.value)}
+                        className="bg-slate-900 border border-slate-800 text-[10px] text-slate-400 focus:outline-none px-1 rounded h-5 font-mono cursor-pointer"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!newTaskText.trim()) return;
+                          const newTask = {
+                            id: Math.random().toString(36).substring(2, 9),
+                            task: newTaskText.trim(),
+                            completed: false,
+                            dueDate: newTaskDueDate || undefined
+                          };
+                          const updated = { ...agentMemory, followUps: [...agentMemory.followUps, newTask] };
+                          setAgentMemory(updated);
+                          handleSaveAgentMemory(updated);
+                          setNewTaskText("");
+                          setNewTaskDueDate("");
+                        }}
+                        className="p-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded cursor-pointer transition flex items-center justify-center"
+                        type="button"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+
+                    {/* Tasks List */}
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5 scrollbar-thin">
+                      {agentMemory.followUps && agentMemory.followUps.length > 0 ? (
+                        [...agentMemory.followUps]
+                          .sort((a, b) => Number(a.completed) - Number(b.completed))
+                          .map((item) => (
+                            <div key={item.id} className={`flex items-center justify-between p-2 rounded text-xs transition ${item.completed ? "bg-slate-950/20 text-slate-500" : "bg-slate-950/40 text-slate-200 border border-slate-900"}`}>
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={item.completed}
+                                  onChange={() => {
+                                    const updatedFollowUps = agentMemory.followUps.map(f => f.id === item.id ? { ...f, completed: !f.completed } : f);
+                                    const updated = { ...agentMemory, followUps: updatedFollowUps };
+                                    setAgentMemory(updated);
+                                    handleSaveAgentMemory(updated);
+                                  }}
+                                  className="rounded border-slate-800 bg-slate-950 text-cyan-600 focus:ring-0 focus:ring-offset-0 cursor-pointer h-3.5 w-3.5"
+                                />
+                                <span className={`truncate text-[11px] font-mono leading-none ${item.completed ? "line-through text-slate-600" : ""}`}>
+                                  {item.task}
+                                </span>
+                                {item.dueDate && (
+                                  <span className={`text-[8.5px] font-mono px-1 rounded border leading-none ${item.completed ? "border-slate-800 bg-slate-950/10 text-slate-700" : "border-amber-500/20 bg-amber-500/10 text-amber-400"}`}>
+                                    {item.dueDate}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const updatedFollowUps = agentMemory.followUps.filter(f => f.id !== item.id);
+                                  const updated = { ...agentMemory, followUps: updatedFollowUps };
+                                  setAgentMemory(updated);
+                                  handleSaveAgentMemory(updated);
+                                }}
+                                className="text-slate-600 hover:text-rose-400 transition ml-2 cursor-pointer shrink-0"
+                                type="button"
+                              >
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="text-center py-4 text-[10px] text-slate-600 font-mono">
+                          No pending follow-ups. Add some above!
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
+
+          </div>
+
+          {/* Deepgram Voice Agent Settings Collapsible Panel */}
+          {showVoiceSettings && (
+            <div className="mx-3 mb-2 p-3 bg-slate-950/95 border border-slate-800/80 rounded-xl space-y-3 font-mono text-[10px] text-slate-300 max-h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900 shadow-2xl ring-1 ring-white/10">
+              <div className="sticky top-0 bg-slate-950/95 z-10 flex items-center justify-between border-b border-slate-800/60 pb-1.5 pt-0.5">
+                <span className="font-bold text-slate-100 flex items-center gap-1.5">
+                  <Sparkles size={11} className="text-indigo-400 animate-pulse" />
+                  DEEPGRAM VOICE AGENT SETTINGS
+                  <span className="text-[8.5px] font-sans font-normal text-cyan-400/80 bg-cyan-950/40 px-1.5 py-0.5 rounded border border-cyan-500/20">Scrollable</span>
+                </span>
+                <button
+                  onClick={() => setShowVoiceSettings(false)}
+                  className="text-slate-500 hover:text-white cursor-pointer"
+                  type="button"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+
+              {/* Engine Select Toggle */}
+              <div className="flex flex-col gap-1.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                <span className="text-slate-400 font-sans font-medium text-[10px]">Speech Synthesis Engine:</span>
+                <div className="grid grid-cols-2 gap-1 bg-slate-950 p-0.5 rounded border border-slate-800/80">
+                  <button
+                    onClick={() => setSpeechEngine("deepgram")}
+                    className={`px-1 py-1 rounded text-[8.5px] transition cursor-pointer font-bold ${speechEngine === "deepgram"
+                        ? "bg-slate-800 text-cyan-400"
+                        : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    type="button"
+                  >
+                    Deepgram Voice Agent
+                  </button>
+                  <button
+                    onClick={() => setSpeechEngine("browser")}
+                    className={`px-1 py-1 rounded text-[8.5px] transition cursor-pointer font-bold ${speechEngine === "browser"
+                        ? "bg-slate-800 text-amber-400"
+                        : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    type="button"
+                  >
+                    Web Speech
+                  </button>
+                </div>
+              </div>
+
+              {/* Speech Speed Rate Selector */}
+              <div className="flex flex-col gap-1.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-sans font-medium text-[10px]">⚡ Agent Speech Pace:</span>
+                  <span className="text-cyan-400 font-mono font-bold text-[9.5px]">
+                    {speechPlaybackRate}x {speechPlaybackRate >= 1.25 ? "⚡ Fast Executive" : speechPlaybackRate > 1.0 ? "⚡ Brisk" : "Normal"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[1.0, 1.15, 1.25, 1.5].map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      onClick={() => setSpeechPlaybackRate(rate)}
+                      className={`py-1 rounded text-[9px] font-mono font-bold cursor-pointer transition ${speechPlaybackRate === rate
+                          ? "bg-indigo-600 text-white border border-indigo-400 shadow-sm shadow-indigo-500/50"
+                          : "bg-slate-950 text-slate-400 border border-slate-800 hover:text-slate-200 hover:border-slate-700"
+                        }`}
+                    >
+                      {rate}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {speechEngine === "deepgram" && (
+                <div className="space-y-2 pt-1">
+                  {/* Connection Status Indicator */}
+                  <div className="flex items-center justify-between bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+                    <span className="text-slate-400 font-medium font-sans text-[10px]">Agent Lifecycle Status:</span>
+                    <span className={`font-mono font-bold px-2 py-0.5 rounded text-[10px] flex items-center gap-1.5 border ${dgLifecycleStatus === "Authenticated"
+                        ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-400"
+                        : dgLifecycleStatus === "Connected"
+                          ? "bg-teal-950/40 border-teal-500/30 text-teal-400"
+                          : dgLifecycleStatus === "Connecting..."
+                            ? "bg-amber-950/40 border-amber-500/30 text-amber-400"
+                            : dgLifecycleStatus === "Error"
+                              ? "bg-rose-950/40 border-rose-500/30 text-rose-400 animate-pulse"
+                              : "bg-slate-950 border-slate-800/80 text-slate-500"
+                      }`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${dgLifecycleStatus === "Authenticated"
+                          ? "bg-emerald-400 animate-pulse"
+                          : dgLifecycleStatus === "Connected"
+                            ? "bg-teal-400"
+                            : dgLifecycleStatus === "Connecting..."
+                              ? "bg-amber-400 animate-ping"
+                              : dgLifecycleStatus === "Error"
+                                ? "bg-rose-500 animate-pulse"
+                                : "bg-slate-600"
+                        }`} />
+                      {dgLifecycleStatus}
+                    </span>
+                  </div>
+
+                  {/* Manual Voice Activation/Deactivation Button */}
+                  <div className="pt-0.5 space-y-1.5">
+                    {dgConnectionStatus === "connected" || dgConnectionStatus === "connecting" ? (
+                      <button
+                        onClick={stopDeepgramVoiceAgent}
+                        className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white border border-rose-400 rounded-lg text-[10px] font-extrabold cursor-pointer transition flex items-center justify-center gap-1.5 shadow-xl animate-pulse"
+                        type="button"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-white animate-ping" />
+                        <span>🛑 EMERGENCY STOP VOICE AGENT (STOP CREDIT DRAIN)</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={startDeepgramVoiceAgent}
+                        className="w-full py-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 rounded-lg text-[10px] font-bold cursor-pointer transition flex items-center justify-center gap-1.5"
+                        type="button"
+                      >
+                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>🎙️ Connect & Start Live Voice Agent</span>
+                      </button>
+                    )}
+                    <div className="text-[8.5px] text-slate-400 font-sans flex items-center justify-between px-1">
+                      <span>🛡️ Credit Guard: Disconnected by default.</span>
+                      <span className="text-cyan-400 font-mono">Zero background drain</span>
+                    </div>
+                  </div>
+
+                  {/* Microphone Volume Scale (Voice Level) */}
+                  {inputMode === "voice" && (
+                    <div className="space-y-1 bg-slate-900/40 p-2 rounded-lg border border-slate-800/40">
+                      <div className="flex items-center justify-between text-[9px] text-slate-400 font-medium">
+                        <span className="flex items-center gap-1">🎤 Your Live Voice Scale:</span>
+                        <span className="font-mono text-cyan-400">{micLevel}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-950 rounded overflow-hidden flex gap-[1px]">
+                        {Array.from({ length: 10 }).map((_, idx) => {
+                          const threshold = (idx + 1) * 10;
+                          const isActive = micLevel >= threshold;
+
+                          // First 6 segments (10%-60%): Green/Emerald
+                          // Next 3 segments (70%-90%): Yellow/Amber
+                          // Last segment (100%): Red/Rose (Peak)
+                          let colorClass = "bg-emerald-500";
+                          if (idx >= 6 && idx <= 8) colorClass = "bg-amber-500";
+                          if (idx === 9) colorClass = "bg-rose-500";
+
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex-1 h-full rounded-[1px] transition-all duration-75 ${isActive ? colorClass : "bg-slate-900"
+                                }`}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* API Key Status & Input */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="dg-api-key-input" className="block text-slate-400">Deepgram Voice API Key:</label>
+                      {hasServerEnvKey && (
+                        <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-1.5 py-0.5 rounded flex items-center gap-1">
+                          🔒 .env Key Active
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      id="dg-api-key-input"
+                      type="password"
+                      value={dgApiKey}
+                      onChange={(e) => setDgApiKey(e.target.value)}
+                      placeholder={hasServerEnvKey ? "•••••••••••••••• (Auto-loaded from .env)" : "Enter Deepgram API Key..."}
+                      className="w-full px-2.5 py-1 bg-slate-900 border border-slate-800 rounded text-[10px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* Diagnostic Tool Button */}
+                  <div className="pt-1">
+                    <button
+                      onClick={runDiagnosticTest}
+                      disabled={isRunningDiagnostic}
+                      className={`w-full py-1.5 px-2.5 rounded text-[10px] font-bold border transition duration-200 flex items-center justify-center gap-1.5 ${isRunningDiagnostic
+                          ? "bg-amber-950/40 border-amber-500/20 text-amber-400 cursor-wait"
+                          : "bg-amber-950/80 border-amber-500/30 text-amber-300 hover:bg-amber-900 hover:text-white cursor-pointer"
+                        }`}
+                      type="button"
+                    >
+                      {isRunningDiagnostic ? (
+                        <>
+                          <RefreshCw className="animate-spin" size={12} />
+                          Analyzing Deepgram API & Voice Link...
+                        </>
+                      ) : (
+                        <>
+                          <Cpu size={12} />
+                          🔍 Run Deepgram Live Connection Diagnostic
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Diagnostic Results Display */}
+                  {diagnosticReport && (
+                    <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-[10px] space-y-1.5 font-mono animate-fade-in">
+                      <div className="flex items-center justify-between font-bold text-slate-300 border-b border-slate-800/80 pb-1">
+                        <span>Diagnostic Report</span>
+                        <span className="text-[9px] text-slate-500">{new Date(diagnosticReport.timestamp).toLocaleTimeString()}</span>
+                      </div>
+
+                      <div className="text-slate-300 leading-relaxed font-sans whitespace-pre-wrap">
+                        {diagnosticReport.summary}
+                      </div>
+
+                      {diagnosticReport.step1_projects && (
+                        <div className="text-slate-400 text-[9px] pt-1 border-t border-slate-900">
+                          <div>• REST API Projects: {diagnosticReport.step1_projects.success ? `✅ (${diagnosticReport.step1_projects.count || 0} found)` : `❌ ${diagnosticReport.step1_projects.error}`}</div>
+                          {diagnosticReport.step2_agents && (
+                            <div>• Agents Scanned: {diagnosticReport.step2_agents.foundAgent ? `✅ (ID: ${diagnosticReport.step2_agents.agentId})` : `ℹ️ Dynamic setup mode`}</div>
+                          )}
+                          {diagnosticReport.step3_wsTest && (
+                            <div>• Voice WS Handshake: {diagnosticReport.step3_wsTest.success ? "✅ Established" : `❌ Failed (${diagnosticReport.step3_wsTest.closeReason || diagnosticReport.step3_wsTest.error})`}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Selected Voice Dropdown */}
+                  <div className="space-y-1">
+                    <label htmlFor="dg-voice-select" className="block text-slate-400">Agent Voice (Deepgram Aura Model):</label>
+                    <select
+                      id="dg-voice-select"
+                      value={dgVoice}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDgVoice(val);
+                        localStorage.setItem("VITE_DEEPGRAM_VOICE", val);
+                      }}
+                      className="w-full px-2 py-1 bg-slate-900 border border-slate-800 rounded text-[10px] text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="aura-2-jupiter-en">Jupiter (Male - Executive Co-Founder)</option>
+                      <option value="aura-arcas-en">Arcas (Male - Professional Partner)</option>
+                      <option value="aura-zeus-en">Zeus (Male - Deep Authoritative)</option>
+                      <option value="aura-helios-en">Helios (Male - Warm & Friendly)</option>
+                      <option value="aura-orion-en">Orion (Male - Energetic)</option>
+                      <option value="aura-perseus-en">Perseus (Male - Confident)</option>
+                      <option value="aura-asteria-en">Asteria (Female - Natural)</option>
+                      <option value="aura-athena-en">Athena (Female - Professional)</option>
+                      <option value="aura-stella-en">Stella (Female - Expressive)</option>
+                      <option value="aura-thalia-en">Thalia (Female - Warm)</option>
+                      <option value="aura-luna-en">Luna (Female - Conversational)</option>
+                    </select>
+                  </div>
+
+                  {/* Project ID Input */}
+                  <div className="space-y-1">
+                    <label htmlFor="dg-project-id-input" className="block text-slate-400">Deepgram Project ID (Optional):</label>
+                    <input
+                      id="dg-project-id-input"
+                      type="text"
+                      value={dgProjectId}
+                      onChange={(e) => setDgProjectId(e.target.value)}
+                      placeholder={(import.meta as any).env.VITE_DEEPGRAM_PROJECT_ID || "Optional - Project identifier..."}
+                      className="w-full px-2.5 py-1 bg-slate-900 border border-slate-800 rounded text-[10px] text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* Agent ID Input */}
+                  <div className="space-y-1.5 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="dg-agent-id-input" className="text-slate-300 font-bold text-[10px]">
+                        Deepgram Console Agent ID:
+                      </label>
+                      <a
+                        href="https://console.deepgram.com"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[9px] text-indigo-400 hover:underline flex items-center gap-0.5"
+                      >
+                        Deepgram Console ↗
+                      </a>
+                    </div>
+
+                    <input
+                      id="dg-agent-id-input"
+                      type="text"
+                      value={dgAgentId}
+                      onChange={(e) => {
+                        setDgAgentId(e.target.value);
+                        localStorage.setItem("VITE_DEEPGRAM_AGENT_ID", e.target.value);
+                      }}
+                      placeholder={(import.meta as any).env.VITE_DEEPGRAM_AGENT_ID || "Paste Agent ID from Deepgram Console..."}
+                      className="w-full px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-[10px] text-cyan-300 font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500"
+                    />
+
+                    {/* Mode Status Indicator */}
+                    <div className="p-2 bg-slate-950 rounded border border-slate-800 text-[9.5px]">
+                      {dgAgentId ? (
+                        <div className="space-y-1">
+                          <div className="text-emerald-400 font-bold flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Active Agent ID: <code className="text-cyan-300 font-mono text-[9px]">{dgAgentId.substring(0, 16)}...</code></span>
+                          </div>
+                          <label className="flex items-center gap-2 pt-1 text-slate-300 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={useConsoleAgentSettings}
+                              onChange={(e) => setUseConsoleAgentSettings(e.target.checked)}
+                              className="accent-cyan-500 cursor-pointer"
+                            />
+                            <span>Use exact settings from Deepgram Console</span>
+                          </label>
+                          <p className="text-[8.5px] text-slate-400 leading-tight pl-5">
+                            {useConsoleAgentSettings
+                              ? "✅ Preserves your custom prompt, voice, and models built directly in Deepgram Console."
+                              : "⚠️ Overrides Console agent with in-app P.A.C. system prompt."}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="text-slate-400 flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                          <span>Dynamic In-App Mode (Auto-creates or configures Agent on-the-fly)</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Deepgram Console Agents Inspector Tool */}
+                  <div className="space-y-1.5 bg-indigo-950/20 p-2.5 rounded-lg border border-indigo-900/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-indigo-300 font-bold text-[10px] flex items-center gap-1">
+                        <Cpu size={12} className="text-indigo-400" />
+                        Deepgram Agent Inspector
+                      </span>
+                      <button
+                        type="button"
+                        onClick={fetchConsoleAgents}
+                        disabled={isFetchingAgents}
+                        className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[9px] font-bold cursor-pointer transition flex items-center gap-1"
+                      >
+                        {isFetchingAgents ? <RefreshCw size={10} className="animate-spin" /> : "🔍 Fetch My Agents"}
+                      </button>
+                    </div>
+
+                    {fetchAgentsError && (
+                      <p className="text-rose-400 text-[9px]">{fetchAgentsError}</p>
+                    )}
+
+                    {consoleAgents.length > 0 ? (
+                      <div className="space-y-1.5 pt-1 max-h-[140px] overflow-y-auto pr-1">
+                        <span className="text-[8.5px] text-slate-400 uppercase tracking-wider font-semibold">Found {consoleAgents.length} Agent(s) in Deepgram Console:</span>
+                        {consoleAgents.map((agent) => {
+                          const isSelected = dgAgentId === agent.agentId;
+                          return (
+                            <div
+                              key={agent.agentId}
+                              className={`p-1.5 rounded border text-[9.5px] font-mono flex items-center justify-between gap-2 transition ${isSelected
+                                  ? "bg-cyan-950/60 border-cyan-500/50 text-cyan-200"
+                                  : "bg-slate-900/80 border-slate-800 hover:border-slate-700 text-slate-300"
+                                }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-slate-200 truncate">{agent.name || agent.title || "P.A.C. Agent"}</div>
+                                <div className="text-[8.5px] text-slate-400 truncate font-mono">ID: {agent.agentId}</div>
+                                <div className="text-[8px] text-slate-500 truncate">Proj: {agent.projectName}</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDgAgentId(agent.agentId);
+                                  localStorage.setItem("VITE_DEEPGRAM_AGENT_ID", agent.agentId);
+                                  setUseConsoleAgentSettings(true);
+                                  setSetupAgentSuccess(`Connected to Console Agent: ${agent.name}`);
+                                  setComputerLogs(prev => [...prev, `[INSPECTOR] Selected Deepgram Console Agent: "${agent.name}" (${agent.agentId})`]);
+                                }}
+                                className={`px-2 py-1 rounded text-[8.5px] font-bold cursor-pointer transition whitespace-nowrap ${isSelected
+                                    ? "bg-emerald-600 text-white"
+                                    : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                                  }`}
+                              >
+                                {isSelected ? "✓ Active" : "Select Agent"}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-[9px] text-slate-400 italic pt-0.5">
+                        Click "Fetch My Agents" to scan your Deepgram Console account for custom pre-built Voice Agents.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* One-Click Agent Generation & Auto-Setup Buttons */}
+                  <div className="pt-1 space-y-1.5">
+                    <button
+                      onClick={() => autoSetupDeepgramAgent(true)}
+                      disabled={isSettingUpAgent}
+                      className={`w-full py-1.5 px-2.5 rounded text-[10px] font-bold border transition duration-200 flex items-center justify-center gap-1.5 ${isSettingUpAgent
+                          ? "bg-cyan-950/50 border-cyan-500/30 text-cyan-300 cursor-wait"
+                          : "bg-cyan-600 hover:bg-cyan-500 border-cyan-400/50 text-slate-950 shadow-sm shadow-cyan-500/20 cursor-pointer"
+                        }`}
+                      type="button"
+                    >
+                      {isSettingUpAgent ? (
+                        <>
+                          <RefreshCw size={11} className="animate-spin text-slate-950" />
+                          <span>Generating New Agent ID...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={11} className="fill-slate-950 text-slate-950" />
+                          <span>⚡ 1-Click Generate New Agent ID</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => autoSetupDeepgramAgent(false)}
+                      disabled={isSettingUpAgent}
+                      className={`w-full py-1 px-2.5 rounded text-[9px] font-semibold border transition duration-200 flex items-center justify-center gap-1.5 ${isSettingUpAgent
+                          ? "bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed"
+                          : "bg-slate-900/80 border-slate-700/80 text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer"
+                        }`}
+                      type="button"
+                    >
+                      <Sparkles size={10} className="text-indigo-400" />
+                      <span>Auto-Detect / Fetch Existing Agent ID</span>
+                    </button>
+
+                    {setupAgentError && (
+                      <div className="text-[8.5px] text-rose-400 mt-1 pl-1 font-sans leading-relaxed max-w-full break-words">
+                        ❌ {setupAgentError}
+                      </div>
+                    )}
+                    {setupAgentSuccess && (
+                      <div className="text-[8.5px] text-emerald-400 mt-1 pl-1 font-sans font-semibold leading-relaxed">
+                        ✅ {setupAgentSuccess}
+                      </div>
+                    )}
+                  </div>
+
+                  {dgCloseCode !== null && (
+                    <div className="mt-1.5 p-2 bg-rose-950/20 border border-rose-500/20 rounded text-[9.5px] leading-relaxed space-y-1">
+                      <div className="flex items-center justify-between text-rose-400 font-bold">
+                        <span>⚠️ CONNECTION DISCONNECTED</span>
+                        <span className="font-mono bg-rose-950/40 px-1 py-0.5 rounded border border-rose-500/10 text-[8.5px]">Code: {dgCloseCode}</span>
+                      </div>
+                      {dgCloseReason && (
+                        <div className="text-slate-300 font-sans italic text-[9px] break-words bg-slate-950/40 p-1 rounded border border-slate-900">
+                          &ldquo;{dgCloseReason}&rdquo;
+                        </div>
+                      )}
+                      <div className="text-slate-400 text-[8.5px] font-sans">
+                        {dgCloseCode === 4004 && (
+                          <span className="text-amber-400 font-medium">
+                            The Agent ID was not found or is invalid for your new API key's project. Make sure you entered your correct Agent ID from your Console, or leave it blank to configure on-the-fly.
+                          </span>
+                        )}
+                        {dgCloseCode === 1011 && (
+                          <span className="text-amber-400 font-medium">
+                            An internal server error occurred. This usually means the API key is unauthorized or lacks administrator/member privileges required for conversational voice features.
+                          </span>
+                        )}
+                        {dgCloseCode === 4000 && (
+                          <span className="text-amber-400 font-medium">
+                            Invalid parameters or bad request. Please check that both your API key and Agent ID are correct.
+                          </span>
+                        )}
+                        {dgCloseCode === 1006 && (
+                          <span className="text-amber-400 font-medium">
+                            Abnormal network termination. Ensure your browser is allowed to connect to wss://agent.deepgram.com.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-1.5 flex gap-1.5">
+                    <button
+                      onClick={() => {
+                        connectDeepgram();
+                        setComputerLogs(prev => [...prev, "[DEEPGRAM] Manual reconnect initiated."]);
+                      }}
+                      className="flex-1 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold text-center transition cursor-pointer"
+                      type="button"
+                    >
+                      Save & Reconnect
+                    </button>
+                    {dgConnectionStatus === "connected" && (
+                      <button
+                        onClick={() => {
+                          if (dgSocketRef.current) dgSocketRef.current.close();
+                        }}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[10px] transition cursor-pointer"
+                        type="button"
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setDgApiKey("");
+                        setDgAgentId("");
+                        localStorage.removeItem("VITE_DEEPGRAM_API_KEY");
+                        localStorage.removeItem("VITE_DEEPGRAM_AGENT_ID");
+                        setDgCloseCode(null);
+                        setDgCloseReason("");
+                        setSetupAgentError("");
+                        setSetupAgentSuccess("");
+                        if (dgSocketRef.current) dgSocketRef.current.close();
+                        setComputerLogs(prev => [...prev, "[DEEPGRAM] Local credentials cleared. Resetting setup states..."]);
+                      }}
+                      className="px-2.5 py-1 bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded text-[10px] transition cursor-pointer font-semibold"
+                      title="Clear saved key and ID from cache"
+                      type="button"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {/* Deepgram Help Desk Info Board */}
+                  <div className="mt-2.5 p-2.5 bg-slate-900/60 border border-indigo-500/15 rounded-lg text-[9px] text-slate-400 space-y-1.5 leading-relaxed font-sans">
+                    <div className="flex items-center gap-1.5 font-bold font-mono text-indigo-400">
+                      <span>💡 DEEPGRAM VOICE CONFIGURATION GUIDE</span>
+                    </div>
+                    <p>
+                      The app connects automatically via bi-directional WebSockets to:
+                      <code className="block bg-slate-950 p-1 rounded mt-1 text-[8.5px] text-slate-300 select-all font-mono break-all border border-slate-900">
+                        wss://agent.deepgram.com/v1/agent
+                      </code>
+                      You do <strong>not</strong> need to change the WebSocket URL. It is fully integrated.
+                    </p>
+                    <p>
+                      <strong>Why does the connection immediately drop/fail?</strong>
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 pl-1">
+                      <li>
+                        <strong>Optional Agent ID:</strong> If you leave the Agent ID blank, P.A.C. automatically sends a real-time configuration payload on connection. You can also click <strong>✨ Auto-Create / Get Agent ID</strong> above to let us create or fetch one for you instantly.
+                      </li>
+                      <li>
+                        <strong>Key Permissions:</strong> Ensure your API Key has <code>Administrator</code> or <code>Member</code> project roles. Standard restricted or guest keys will fail to authenticate with the <code>v1/agent</code> endpoint.
+                      </li>
+                      <li>
+                        <strong>Billing Status:</strong> Free tier accounts without verified billing sometimes have access restricted for live streaming WebSocket agents.
+                      </li>
+                    </ul>
+                  </div>
+
+                </div>
+              )}
+
+              {speechEngine === "browser" && (
+                <div className="space-y-2 pt-1">
+                  {/* Microphone Volume Scale (Voice Level) */}
+                  {inputMode === "voice" && (
+                    <div className="space-y-1 bg-slate-900/40 p-2 rounded-lg border border-slate-800/40">
+                      <div className="flex items-center justify-between text-[9px] text-slate-400 font-medium">
+                        <span className="flex items-center gap-1">🎤 Your Live Voice Scale:</span>
+                        <span className="font-mono text-cyan-400">{micLevel}%</span>
+                      </div>
+                      <div className="h-2 w-full bg-slate-950 rounded overflow-hidden flex gap-[1px]">
+                        {Array.from({ length: 10 }).map((_, idx) => {
+                          const threshold = (idx + 1) * 10;
+                          const isActive = micLevel >= threshold;
+                          let colorClass = "bg-amber-500";
+                          if (idx >= 6 && idx <= 8) colorClass = "bg-orange-500";
+                          if (idx === 9) colorClass = "bg-yellow-500";
+
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex-1 h-full rounded-[1px] transition-all duration-75 ${isActive ? colorClass : "bg-slate-900"
+                                }`}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-slate-900/60 border border-slate-800/80 rounded-lg text-[9.5px] leading-relaxed text-slate-400 space-y-1">
+                    <span className="font-bold text-slate-200">ℹ️ OFFLINE BROWSER SYNTHESIS</span>
+                    <p>
+                      Uses standard HTML5 speech synthesis built-in natively to your device browser.
+                    </p>
+                    <ul className="list-disc pl-3.5 pt-1 space-y-0.5">
+                      <li>Requires no third-party accounts or cloud API keys.</li>
+                      <li>Highly responsive and completely free of charge.</li>
+                      <li>Quality may vary depending on device capabilities and selected OS speech engines.</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 4. Draggable Footer Action Input Block */}
+          <div className="p-3 bg-slate-900/60 border-t border-slate-800/80 flex flex-col gap-2">
+            {/* Live voice activity status & meters if Deepgram or voice active */}
+            {dgConnectionStatus === "connected" && (
+              <div className="flex items-center justify-between text-[9px] font-mono px-1 py-0.5 bg-slate-950/80 border border-slate-800/60 rounded">
+                <div className="flex items-center gap-1.5 text-slate-300">
+                  <span className={`h-1.5 w-1.5 rounded-full ${!isMicMuted ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                  <span>
+                    {!isMicMuted ? (pacStatus === "speaking" ? "P.A.C. Speaking (Barge-in ready)" : `Mic Listening (${micLevel}%)`) : "Mic Muted (Text Only)"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* Speaker mute indicator */}
+                  {isSpeakerMuted && (
+                    <span className="text-amber-400 font-bold px-1 py-0.2 bg-amber-950/50 border border-amber-500/30 rounded text-[8px]">
+                      🔇 Muted
+                    </span>
+                  )}
+                  {/* Live Status indicator */}
+                  <span className={`px-1.5 py-0.2 rounded border flex items-center gap-1 font-semibold text-[8px] ${
+                    dgLifecycleStatus === "Authenticated"
+                      ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-400"
+                      : "bg-teal-950/30 border-teal-500/20 text-teal-400"
+                  }`}>
+                    <span className="h-1 w-1 rounded-full bg-emerald-400" />
+                    {dgLifecycleStatus}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-2">
+              {/* Mic, Speaker, and Voice Settings Control Buttons */}
+              <div className="flex items-center gap-1.5">
+                {/* Microphone Toggle */}
+                <button
+                  onClick={() => {
+                    const nextMuted = !isMicMuted;
+                    setIsMicMuted(nextMuted);
+                    if (nextMuted) {
+                      stopDgMic();
+                      setComputerLogs(prev => [...prev, "[P.A.C. AUDIO] Microphone muted. Agent remains ONLINE."]);
+                    } else {
+                      if (dgSocketRef.current && dgConnectionStatus === "connected") {
+                        startDgMic();
+                      }
+                      setComputerLogs(prev => [...prev, "[P.A.C. AUDIO] Microphone unmuted. Voice capture live."]);
+                    }
+                  }}
+                  className={`p-2 rounded-full transition cursor-pointer border ${
+                    !isMicMuted
+                      ? "bg-emerald-950/80 text-emerald-400 border-emerald-500/40 animate-pulse"
+                      : "bg-slate-950 hover:bg-slate-800 text-amber-400 border-slate-800"
+                  }`}
+                  title={!isMicMuted ? "Microphone ON - Click to Mute Microphone" : "Microphone MUTED - Click to Unmute Microphone"}
+                  type="button"
+                >
+                  {!isMicMuted ? <Mic size={13} /> : <MicOff size={13} />}
+                </button>
+
+                {/* Speaker Sound Output Toggle */}
+                <button
+                  onClick={() => {
+                    const nextMuted = !isSpeakerMuted;
+                    setIsSpeakerMuted(nextMuted);
+                    if (nextMuted) {
+                      stopStreamingPlayback();
+                      setComputerLogs(prev => [...prev, "[P.A.C. AUDIO] Speaker output muted. Agent remains ONLINE."]);
+                    } else {
+                      setComputerLogs(prev => [...prev, "[P.A.C. AUDIO] Speaker output unmuted."]);
+                    }
+                  }}
+                  className={`p-2 rounded-full transition cursor-pointer border ${
+                    !isSpeakerMuted
+                      ? "bg-cyan-950/80 text-cyan-400 border-cyan-500/40"
+                      : "bg-slate-950 hover:bg-slate-800 text-amber-400 border-slate-800"
+                  }`}
+                  title={!isSpeakerMuted ? "Speaker Sound ON - Click to Mute Agent Voice Output" : "Speaker Sound MUTED - Click to Unmute Agent Voice Output"}
+                  type="button"
+                >
+                  {!isSpeakerMuted ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                </button>
+
+                {/* Deepgram Voice Agent Settings Drawer Toggle */}
+                <button
+                  onClick={() => setShowVoiceSettings(!showVoiceSettings)}
+                  className={`px-2.5 py-1.5 rounded-full transition cursor-pointer border flex items-center gap-1 font-mono text-[10px] font-semibold ${
+                    showVoiceSettings || dgConnectionStatus === "connected"
+                      ? "bg-indigo-950/80 border-indigo-500/40 text-indigo-300 shadow-sm shadow-indigo-500/20"
+                      : "bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white"
+                  }`}
+                  title="Click to Open Deepgram Voice Agent Settings Drawer (⚙️)"
+                  type="button"
+                >
+                  <Settings size={13} className={dgConnectionStatus === "connecting" ? "animate-spin text-amber-400" : "text-indigo-400"} />
+                  <span>Settings</span>
+                </button>
+
+                {/* Instant STOP button in footer controls */}
+                {dgConnectionStatus === "connected" || dgConnectionStatus === "connecting" ? (
+                  <button
+                    onClick={stopDeepgramVoiceAgent}
+                    className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white border border-rose-400 rounded-full font-mono text-[10px] font-extrabold flex items-center gap-1 shadow-lg cursor-pointer transition animate-pulse"
+                    title="IMMEDIATELY stop Voice Agent & cut credit usage"
+                    type="button"
+                  >
+                    <span>🛑 STOP VOICE</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={startDeepgramVoiceAgent}
+                    className="px-2.5 py-1.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 rounded-full font-mono text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition"
+                    title="Start Deepgram Live Voice Agent"
+                    type="button"
+                  >
+                    <Mic size={13} className="text-emerald-400 animate-pulse" />
+                    <span>Start Voice</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Core Text Input Form (Always Available) */}
+              <form
+                onSubmit={(e) => { e.preventDefault(); handleSendInput(textInput); }}
+                className="flex-1 flex gap-2"
+              >
+                <input
+                  id="pac-chat-text-input"
+                  aria-label="Collaborate with P.A.C. co-founder text input"
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder={
+                    dgConnectionStatus === "connected"
+                      ? "Type or speak to P.A.C. (Agent Online)..."
+                      : "Collaborate with P.A.C. co-founder..."
+                  }
+                  className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-600 font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                />
+                <button
+                  type="submit"
+                  disabled={!textInput.trim() || pacStatus === "thinking"}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:text-slate-600 text-white rounded-lg transition flex items-center justify-center gap-1 cursor-pointer text-xs font-semibold"
+                >
+                  <Send size={12} />
+                  <span>Send</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

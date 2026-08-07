@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Register default Trusted Types policy synchronously at the earliest moment
+      // to prevent system/platform scripts (like prepare.js) from raising console errors.
+      if (typeof window !== 'undefined' && window.trustedTypes && typeof window.trustedTypes.createPolicy === 'function') {
+        try {
+          window.trustedTypes.createPolicy('default', {
+            createScript: function(input) { return input; },
+            createHTML: function(input) { return input; },
+            createScriptURL: function(input) { return input; }
+          });
+          console.log('Early Trusted Types "default" policy registered successfully.');
+        } catch (e) {
+          // Policy may already be defined or browser-restricted
+        }
+      }
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
