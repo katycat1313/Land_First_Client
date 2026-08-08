@@ -5348,7 +5348,7 @@ app.get("/api/deepgram/list-agents", async (req, res) => {
   }
 });
 
-app.get("/api/deepgram/diagnose", async (req, res) => {
+const handleDeepgramDiagnose = async (req: any, res: any) => {
   const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || (req.query.key as string);
   const targetAgentId = process.env.DEEPGRAM_AGENT_ID || process.env.VITE_DEEPGRAM_AGENT_ID || (req.query.agent_id as string);
 
@@ -5513,7 +5513,10 @@ app.get("/api/deepgram/diagnose", async (req, res) => {
     report.summary = `❌ Diagnostic failed: ${err.message || err}`;
     return res.status(500).json(report);
   }
-});
+};
+app.get("/api/deepgram/diagnose", handleDeepgramDiagnose);
+app.get("/api/deepgram/diagnostic", handleDeepgramDiagnose);
+
 
 app.post("/api/deepgram/setup", async (req, res) => {
   let { apiKey, projectId, voice, forceNew } = req.body;
