@@ -156,11 +156,41 @@ const getGeminiClient = () => {
   });
 };
 
+// Helper to fetch with automatic ngrok TLD fallback (.ngrok-free.app <-> .ngrok-free.dev)
+async function fetchWithNgrokFallback(url: string, options?: RequestInit): Promise<Response> {
+  try {
+    const res = await fetch(url, options);
+    if (res.ok) return res;
+    if (url.includes(".ngrok-free.app")) {
+      const altUrl = url.replace(".ngrok-free.app", ".ngrok-free.dev");
+      const altRes = await fetch(altUrl, options);
+      if (altRes.ok) return altRes;
+    } else if (url.includes(".ngrok-free.dev")) {
+      const altUrl = url.replace(".ngrok-free.dev", ".ngrok-free.app");
+      const altRes = await fetch(altUrl, options);
+      if (altRes.ok) return altRes;
+    }
+    return res;
+  } catch (err) {
+    if (url.includes(".ngrok-free.app")) {
+      const altUrl = url.replace(".ngrok-free.app", ".ngrok-free.dev");
+      console.log(`[Ngrok Domain Auto-Heal] Primary domain .app failed. Retrying with .dev domain: ${altUrl}`);
+      return await fetch(altUrl, options);
+    }
+    if (url.includes(".ngrok-free.dev")) {
+      const altUrl = url.replace(".ngrok-free.dev", ".ngrok-free.app");
+      console.log(`[Ngrok Domain Auto-Heal] Primary domain .dev failed. Retrying with .app domain: ${altUrl}`);
+      return await fetch(altUrl, options);
+    }
+    throw err;
+  }
+}
+
 // ==========================================
 // Ollama Qwen2.5 G14 / Mac Local LLM Gateway
 // ==========================================
 let llmConfig = {
-  baseUrl: process.env.OLLAMA_BASE_URL || "https://numbly-clapping-filling.ngrok-free.app",
+  baseUrl: process.env.OLLAMA_BASE_URL || "https://numbly-clapping-filling.ngrok-free.dev",
   model: process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct-q4_k_m",
   provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini"
 };
@@ -216,7 +246,7 @@ async function callOllamaLLM({
     bodyPayload.format = "json";
   }
 
-  const response = await fetch(`${targetBaseUrl}/api/chat`, {
+  const response = await fetchWithNgrokFallback(`${targetBaseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(bodyPayload)
@@ -544,7 +574,7 @@ app.post("/api/llm/status", async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const versionRes = await fetch(`${targetBaseUrl}/api/version`, {
+    const versionRes = await fetchWithNgrokFallback(`${targetBaseUrl}/api/version`, {
       method: "GET",
       headers: { "Content-Type": "application/json" }
     });
@@ -558,7 +588,7 @@ app.post("/api/llm/status", async (req, res) => {
 
     let availableModels: string[] = [];
     try {
-      const tagsRes = await fetch(`${targetBaseUrl}/api/tags`, {
+      const tagsRes = await fetchWithNgrokFallback(`${targetBaseUrl}/api/tags`, {
         method: "GET",
         headers: { "Content-Type": "application/json" }
       });
@@ -3166,11 +3196,11 @@ async function sendDualEmailWithFallback(params: {
   let fallbackActivated = false;
 
   // 1. Primary Attempt: n8n Webhook Trigger
-  const n8nWebhookUrl = process.env.N8N_EMAIL_WEBHOOK_URL || "https://numbly-clapping-filling.ngrok-free.app/webhook/send-email";
+  const n8nWebhookUrl = process.env.N8N_EMAIL_WEBHOOK_URL || "https://numbly-clapping-filling.ngrok-free.dev/webhook/send-email";
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
-    const n8nRes = await fetch(n8nWebhookUrl, {
+    const n8nRes = await fetchWithNgrokFallback(n8nWebhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

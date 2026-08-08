@@ -11,7 +11,7 @@ interface OllamaTunnelModalProps {
 }
 
 export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: OllamaTunnelModalProps) {
-  const [baseUrl, setBaseUrl] = useState("https://numbly-clapping-filling.ngrok-free.app");
+  const [baseUrl, setBaseUrl] = useState("https://numbly-clapping-filling.ngrok-free.dev");
   const [model, setModel] = useState("qwen2.5:7b-instruct-q4_k_m");
   const [provider, setProvider] = useState<"auto" | "ollama" | "gemini">("auto");
 
