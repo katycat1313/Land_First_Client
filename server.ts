@@ -4319,6 +4319,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           }
           
           for (const opp of alertsToTrigger) {
+            const baseUrl = (process.env.NGROK_TUNNEL_URL || process.env.APP_URL || "").replace(/\/$/, "");
             const emailSubject = `🚨 New [${opp.industry || "Business Pain"}] Opportunity Discovered (Score: ${opp.opportunityScore}/100)`;
             const emailBody = `=========================================
 OPPORTUNITY RADAR: HIGH-POTENTIAL ALERT
@@ -4340,7 +4341,7 @@ A new, highly qualified opportunity has been discovered by your bot fleet:
 💬 Core Bottleneck / Pain Point:
 "${opp.problemSummary}"
 
-🧪 emotional evidence:
+🧪 Emotional Evidence:
 "${opp.evidence}"
 
 💡 Suggested MVP Idea (2-week build):
@@ -4350,11 +4351,14 @@ A new, highly qualified opportunity has been discovered by your bot fleet:
 ${opp.willingnessToPay}
 
 -----------------------------------------
-Outreach Draft Ready to Copy-Paste:
+Outreach Draft Ready:
 -----------------------------------------
 ${opp.responseDraft}
 
 -----------------------------------------
+⚡ 1-Click Platform Actions:
+👉 Approve & Copy Draft: ${baseUrl}/api/one-click/approve-platform?id=${opp.id}
+👉 Request Revision: ${baseUrl}/api/one-click/request-revision?id=${opp.id}
 =========================================`;
             
             existingAlerts.unshift({
@@ -4367,6 +4371,16 @@ ${opp.responseDraft}
               oppTitle: opp.title,
               oppScore: opp.opportunityScore
             });
+            
+            // Dispatch the actual email alert using your n8n / Native Gmail system
+            sendDualEmailWithFallback({
+              to: alertRecipient,
+              subject: emailSubject,
+              bodyText: emailBody,
+              opportunityId: opp.id,
+              platform: opp.sourcePlatform,
+              actionType: "outreach"
+            }).catch(err => console.error("[Alert Delivery Error] Failed to send real alert email:", err));
             
             console.log(`[Alert Delivered] Email simulated successfully to ${alertRecipient}.\nSubject: ${emailSubject}`);
             logs.push(`[Email Alerts] ✅ Alert email sent to ${alertRecipient} for "${opp.title}" (Score: ${opp.opportunityScore})`);

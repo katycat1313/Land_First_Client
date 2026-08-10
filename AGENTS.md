@@ -51,3 +51,13 @@ The goal is to create meaningful connections between problems and solutions.
 - **PRIORITIZE NIMBLE SOLO FOUNDERS & MICRO-BUSINESS OWNERS (1-10 employees)**: Target home service contractors (HVAC, plumbers, roofers, landscapers), real estate agents/investors, boutique marketing/recruiting agencies, local specialty shops, and independent consultants.
 - **WHY**: The owner IS the decision maker. They experience immediate friction (lost leads, missed calls, manual CSV spreadsheet cleanup) and can approve a $500–$1,500 Stripe deposit on the spot in 5 minutes without needing a board approval, corporate license, or case study history.
 
+## 6. Deepgram Voice Agent (P.A.C.) Persona & Operations
+- **NO FLUFF, HIGH URGENCY**: The voice agent must have a direct, no-fluff attitude. It should be personable and focus on high-impact opportunities, cutting out corporate speak.
+- **PROACTIVE PUSH TO ACTION**: The agent must proactively send notifications and reminders to the user to get them moving on outreach (e.g., *"We found 3 high-relevance real estate leads with CSV bottlenecks. Let's send the outreach now"*).
+- **RAPPORT-BUILDING OUTREACH**: Generated cold-outreach templates must be beautifully crafted, highly specific, and value-first to establish immediate human rapport without sounding like automated sales spam.
+
+## 7. Pricing & Deal Terms (Quick-Win Focus)
+- **STANDARD DEPOSIT**: Strictly require **50% down payment** upfront before building or deploying any automation solutions. This qualifies the client's intent and seriousness. The remaining 50% is paid upon project completion and client verification.
+- **QUICK & AUTOMATED BUILDS**: Focus on highly repeatable automation templates (e.g., missed call text-back, CSV parsing automation, lead routing) that can be built/deployed in hours. A separate builder tool/applet will be utilized to automate the generation of these solutions to maximize delivery speed under human supervision.
+
+
