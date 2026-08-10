@@ -12,6 +12,7 @@ export default defineConfig(() => {
       },
     },
     server: {
+      allowedHosts: true,
       // Directs HMR WebSocket through standard HTTPS port (443) in production, or uses default local port locally
       hmr: process.env.DISABLE_HMR === 'true' ? false : (process.env.APP_URL && process.env.APP_URL !== "MY_APP_URL" ? { clientPort: 443 } : true),
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
