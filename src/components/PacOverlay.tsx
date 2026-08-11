@@ -236,8 +236,6 @@ export default function PacOverlay({
     lastChecked: string | null;
     allHealthy: boolean;
     issues: string[];
-    llmProvider: "auto" | "ollama" | "gemini";
-    activeModelName: string;
     subsystems: {
       deepgramVoice: boolean | "degraded";
       geminiChat: boolean;
@@ -250,8 +248,6 @@ export default function PacOverlay({
     lastChecked: null,
     allHealthy: true,
     issues: [],
-    llmProvider: "auto",
-    activeModelName: "qwen2.5:7b-instruct-q4_k_m",
     subsystems: {
       deepgramVoice: true,
       geminiChat: true,
@@ -271,21 +267,6 @@ export default function PacOverlay({
       uiNavigator: true,
       audioCapture: true
     };
-
-    let activeProvider: "auto" | "ollama" | "gemini" = "auto";
-    let activeModel = "qwen2.5:7b-instruct-q4_k_m";
-
-    // 0. Fetch active LLM config
-    try {
-      const configRes = await fetch("/api/llm/config");
-      if (configRes.ok) {
-        const configData = await configRes.json();
-        activeProvider = configData.provider || "auto";
-        activeModel = configData.model || "qwen2.5";
-      }
-    } catch (e) {
-      console.warn("Failed to fetch LLM config for diagnostics:", e);
-    }
 
     // 1. Deepgram Voice API & Key Check
     try {
@@ -320,42 +301,20 @@ export default function PacOverlay({
       issuesList.push("Agent Memory API network error.");
     }
 
-    // 3. LLM Core Endpoint Check (Directly tests Ollama status if selected)
-    if (activeProvider === "ollama" || activeProvider === "auto") {
-      try {
-        const statusRes = await fetch("/api/llm/status", { method: "POST" });
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          if (statusData.success) {
-            subState.geminiChat = true;
-          } else {
-            subState.geminiChat = false;
-            issuesList.push(`Ollama Local LLM offline: ${statusData.error || "Connection timed out"}`);
-          }
-        } else {
-          subState.geminiChat = false;
-          issuesList.push("Ollama status endpoint returned HTTP error.");
-        }
-      } catch (e) {
+    // 3. Gemini Chat AI Endpoint Check
+    try {
+      const chatRes = await fetch("/api/pac/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "diagnostics_ping", history: [] })
+      });
+      if (!chatRes.ok && chatRes.status !== 400) {
         subState.geminiChat = false;
-        issuesList.push("Failed to test Ollama status endpoint.");
+        issuesList.push("Gemini Chat API returned error status.");
       }
-    } else {
-      // Fallback or explicit Gemini check
-      try {
-        const chatRes = await fetch("/api/pac/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: "diagnostics_ping", history: [] })
-        });
-        if (!chatRes.ok && chatRes.status !== 400) {
-          subState.geminiChat = false;
-          issuesList.push("Gemini Chat API returned error status.");
-        }
-      } catch (e) {
-        subState.geminiChat = false;
-        issuesList.push("Gemini Chat API offline.");
-      }
+    } catch (e) {
+      subState.geminiChat = false;
+      issuesList.push("Gemini Chat API offline.");
     }
 
     // 4. Audio MediaDevices Support
@@ -371,16 +330,13 @@ export default function PacOverlay({
       lastChecked: nowTime,
       allHealthy: healthy,
       issues: issuesList,
-      llmProvider: activeProvider,
-      activeModelName: activeModel,
       subsystems: subState
     });
 
     if (healthy) {
-      const coreName = activeProvider === "gemini" ? "Gemini Core" : `Ollama Core (${activeModel})`;
       setComputerLogs(prev => [
         ...prev,
-        `[P.A.C. DIAGNOSTICS] Silent self-check COMPLETE (${nowTime}). All 5 core subsystems nominal: Deepgram Voice (OK), ${coreName} (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK).`
+        `[P.A.C. DIAGNOSTICS] Silent self-check COMPLETE (${nowTime}). All 5 core subsystems nominal: Deepgram Voice (OK), Gemini Chat (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK).`
       ]);
     } else {
       setComputerLogs(prev => [
@@ -2675,11 +2631,7 @@ registerProcessor('pcm-processor', PCMProcessor);
                       </span>
                     </div>
                     <div className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between">
-                      <span className="text-slate-400">
-                        🧠 {diagnosticsResult.llmProvider === "gemini" 
-                          ? "Gemini AI Core:" 
-                          : `Ollama Core (${diagnosticsResult.activeModelName.split(":")[0]}):`}
-                      </span>
+                      <span className="text-slate-400">🧠 Gemini AI Core:</span>
                       <span className={diagnosticsResult.subsystems.geminiChat ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
                         {diagnosticsResult.subsystems.geminiChat ? "Online" : "Offline"}
                       </span>

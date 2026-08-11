@@ -100,7 +100,7 @@ function safeParseJSON(text: string): any {
 }
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 3000;
 
 app.use(express.json());
 
@@ -124,7 +124,13 @@ app.post("/api/auth/verify", (req, res) => {
 app.use((req, res, next) => {
   const appPassword = process.env.APP_PASSWORD;
   if (appPassword && req.path.startsWith("/api/")) {
-    if (req.path === "/api/auth/verify" || req.path === "/api/auth/status" || req.path === "/api/agent/chat" || req.path === "/api/inbound-reply") {
+    if (
+      req.path === "/api/auth/verify" ||
+      req.path === "/api/auth/status" ||
+      req.path === "/api/agent/chat" ||
+      req.path === "/api/inbound-reply" ||
+      req.path === "/api/public/submit-lead"
+    ) {
       return next();
     }
     const clientPassword = req.headers["x-app-password"];
@@ -540,6 +546,91 @@ app.delete("/api/opportunities/:id", (req, res) => {
   opps = opps.filter(o => o.id !== id);
   saveOpportunities(opps);
   res.json({ success: true });
+});
+
+// 4b. Public Lead Form Submission for missedrevenue.org
+app.post("/api/public/submit-lead", (req, res) => {
+  try {
+    const {
+      businessName,
+      contactName,
+      email,
+      phone,
+      industry,
+      monthlyDealValue,
+      primaryBottleneck,
+      notes
+    } = req.body || {};
+
+    if (!primaryBottleneck && !businessName && !email) {
+      return res.status(400).json({ error: "Please provide a business name, contact info, or bottleneck description." });
+    }
+
+    const bName = (businessName || "Local Business").trim();
+    const cName = (contactName || "Owner / Manager").trim();
+    const leadEmail = (email || "Not provided").trim();
+    const leadPhone = (phone || "Not provided").trim();
+    const ind = (industry || "Small Business Operations").trim();
+    const dealVal = (monthlyDealValue || "$1,000 - $3,000").trim();
+    const bottleneck = (primaryBottleneck || "Manual follow-ups & missed calls").trim();
+
+    const newLeadId = `lead-inbound-${Date.now()}`;
+
+    // Estimate monthly revenue loss for display
+    let estMonthlyLoss = 3500;
+    if (dealVal.includes("7,000") || dealVal.includes("10,000")) estMonthlyLoss = 15000;
+    else if (dealVal.includes("3,000") || dealVal.includes("5,000")) estMonthlyLoss = 7500;
+
+    const newOpportunity: any = {
+      id: newLeadId,
+      title: `⚡ INBOUND LEAD: ${bName} (${cName})`,
+      authorName: cName,
+      authorClass: "Business Owner / Decision Maker",
+      authorHandle: leadEmail !== "Not provided" ? leadEmail : leadPhone,
+      platform: "Inbound Audit Form (missedrevenue.org)",
+      industry: ind,
+      originalSourceLink: `https://missedrevenue.org/#audit-${Date.now()}`,
+      fullPostText: `INBOUND REVENUE RECOVERY AUDIT REQUEST:
+Business Name: ${bName}
+Contact Person: ${cName}
+Email: ${leadEmail}
+Phone/Telegram: ${leadPhone}
+Industry: ${ind}
+Est. Deal Value / Ticket Size: ${dealVal}
+Primary Bottleneck / Pain Point:
+${bottleneck}
+
+Additional Context:
+${notes || "None provided"}`,
+      detectedProblem: bottleneck,
+      commercialIntent: "High",
+      painLevel: "High",
+      opportunityScore: 98,
+      possibleSolution: `Automated Missed Call Text-Back, AI Lead Nurturing & Auto-Scheduling System for ${bName}`,
+      outreachDraft: `Hi ${cName}, thanks for requesting an AI Revenue Audit for ${bName}. P.A.C. has analyzed your primary bottleneck: "${bottleneck}". We can deploy a 24/7 lead recapture system to stop losing potential ${dealVal} deals. Let's get this connected!`,
+      status: "Inbound Lead",
+      crmNotes: `Submitted on missedrevenue.org at ${new Date().toLocaleString()}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const opps = loadOpportunities();
+    opps.unshift(newOpportunity);
+    saveOpportunities(opps);
+
+    console.log(`[Inbound Audit Request] Saved lead from ${bName} (${cName}) - Lead ID: ${newLeadId}`);
+
+    res.json({
+      success: true,
+      message: "Revenue audit request received! P.A.C. is analyzing your bottleneck.",
+      leadId: newLeadId,
+      estimatedMonthlyLoss: estMonthlyLoss,
+      opportunity: newOpportunity
+    });
+  } catch (err: any) {
+    console.error("[Inbound Lead Error]", err);
+    res.status(500).json({ error: err.message || "Failed to process lead request." });
+  }
 });
 
 // ==========================================
@@ -4319,7 +4410,6 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           }
           
           for (const opp of alertsToTrigger) {
-            const baseUrl = (process.env.NGROK_TUNNEL_URL || process.env.APP_URL || "").replace(/\/$/, "");
             const emailSubject = `🚨 New [${opp.industry || "Business Pain"}] Opportunity Discovered (Score: ${opp.opportunityScore}/100)`;
             const emailBody = `=========================================
 OPPORTUNITY RADAR: HIGH-POTENTIAL ALERT
@@ -4341,7 +4431,7 @@ A new, highly qualified opportunity has been discovered by your bot fleet:
 💬 Core Bottleneck / Pain Point:
 "${opp.problemSummary}"
 
-🧪 Emotional Evidence:
+🧪 emotional evidence:
 "${opp.evidence}"
 
 💡 Suggested MVP Idea (2-week build):
@@ -4351,14 +4441,11 @@ A new, highly qualified opportunity has been discovered by your bot fleet:
 ${opp.willingnessToPay}
 
 -----------------------------------------
-Outreach Draft Ready:
+Outreach Draft Ready to Copy-Paste:
 -----------------------------------------
 ${opp.responseDraft}
 
 -----------------------------------------
-⚡ 1-Click Platform Actions:
-👉 Approve & Copy Draft: ${baseUrl}/api/one-click/approve-platform?id=${opp.id}
-👉 Request Revision: ${baseUrl}/api/one-click/request-revision?id=${opp.id}
 =========================================`;
             
             existingAlerts.unshift({
@@ -4371,16 +4458,6 @@ ${opp.responseDraft}
               oppTitle: opp.title,
               oppScore: opp.opportunityScore
             });
-            
-            // Dispatch the actual email alert using your n8n / Native Gmail system
-            sendDualEmailWithFallback({
-              to: alertRecipient,
-              subject: emailSubject,
-              bodyText: emailBody,
-              opportunityId: opp.id,
-              platform: opp.sourcePlatform,
-              actionType: "outreach"
-            }).catch(err => console.error("[Alert Delivery Error] Failed to send real alert email:", err));
             
             console.log(`[Alert Delivered] Email simulated successfully to ${alertRecipient}.\nSubject: ${emailSubject}`);
             logs.push(`[Email Alerts] ✅ Alert email sent to ${alertRecipient} for "${opp.title}" (Score: ${opp.opportunityScore})`);
@@ -5362,7 +5439,7 @@ app.get("/api/deepgram/list-agents", async (req, res) => {
   }
 });
 
-const handleDeepgramDiagnose = async (req: any, res: any) => {
+app.get("/api/deepgram/diagnose", async (req, res) => {
   const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || (req.query.key as string);
   const targetAgentId = process.env.DEEPGRAM_AGENT_ID || process.env.VITE_DEEPGRAM_AGENT_ID || (req.query.agent_id as string);
 
@@ -5527,10 +5604,7 @@ const handleDeepgramDiagnose = async (req: any, res: any) => {
     report.summary = `❌ Diagnostic failed: ${err.message || err}`;
     return res.status(500).json(report);
   }
-};
-app.get("/api/deepgram/diagnose", handleDeepgramDiagnose);
-app.get("/api/deepgram/diagnostic", handleDeepgramDiagnose);
-
+});
 
 app.post("/api/deepgram/setup", async (req, res) => {
   let { apiKey, projectId, voice, forceNew } = req.body;

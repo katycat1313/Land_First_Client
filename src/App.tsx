@@ -15,8 +15,10 @@ import {
 } from "lucide-react";
 import { initAuth, googleSignIn, logout as googleLogout } from "./lib/firebaseAuth";
 import { User } from "firebase/auth";
+import PublicLandingView from "./components/PublicLandingView";
 
 export default function App() {
+  const [appMode, setAppMode] = useState<'public' | 'dashboard'>('public');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [stats, setStats] = useState<Stats>({
     totalDiscovered: 0,
@@ -829,6 +831,18 @@ export default function App() {
     return "bg-rose-500/10 text-rose-400 border-rose-500/20";
   };
 
+  if (appMode === "public") {
+    return (
+      <PublicLandingView
+        onOpenFounderLogin={() => {
+          setAppMode("dashboard");
+        }}
+        isUnlocked={!isAppLocked}
+        onSwitchToDashboard={() => setAppMode("dashboard")}
+      />
+    );
+  }
+
   if (isAppLocked) {
     return (
       <div className="min-h-screen bg-[#01070e] text-slate-100 flex items-center justify-center p-4 font-sans selection:bg-[#3b82f6] selection:text-white">
@@ -839,7 +853,7 @@ export default function App() {
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center mb-4 text-cyan-400 shadow-lg">
               <Lock className="w-7 h-7" />
             </div>
-            <h2 className="text-xl font-bold font-mono tracking-wide text-white uppercase">Access Restricted</h2>
+            <h2 className="text-xl font-bold font-mono tracking-wide text-white uppercase">Founder Radar Access</h2>
             <p className="text-xs text-slate-400 mt-1">
               Opportunity Radar is protected by a master access passcode.
             </p>
@@ -888,10 +902,16 @@ export default function App() {
             </button>
           </form>
 
-          <div className="mt-6 pt-4 border-t border-slate-800/80 text-center text-[11px] text-slate-500">
-            <p className="flex items-center justify-center gap-1">
+          <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
+            <button
+              onClick={() => setAppMode("public")}
+              className="text-amber-400 hover:text-amber-300 transition-colors font-medium flex items-center gap-1"
+            >
+              ← Back to Public Website
+            </button>
+            <p className="flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Configured via <code className="text-cyan-400 font-mono">APP_PASSWORD</code> in <code className="text-slate-300 font-mono">.env</code>
+              <code className="text-cyan-400 font-mono">APP_PASSWORD</code>
             </p>
           </div>
         </div>
@@ -927,6 +947,14 @@ export default function App() {
         
         {/* Environment status bars */}
         <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
+          <button
+            onClick={() => setAppMode("public")}
+            className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded flex items-center gap-1.5 font-bold transition cursor-pointer"
+            title="Switch to Public Landing Page (missedrevenue.org)"
+          >
+            <Globe size={13} className="text-amber-400" />
+            <span>Public Site (missedrevenue.org)</span>
+          </button>
           <div className="px-3 py-1 bg-[#082a72] border border-[#93c5fd]/30 rounded flex items-center gap-2 text-teal-100">
             <span>Server:</span>
             <span className="text-[#a5eee2] font-bold uppercase">Online</span>
