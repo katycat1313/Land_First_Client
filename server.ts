@@ -1,14 +1,27 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import dns from "dns";
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
+
+const supabaseUrl = process.env.SUPABASE_URL || (process.env.SUPABASE_PROJECT_ID ? `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co` : null);
+const supabaseKey = process.env.SUPABASE_API_KEY || process.env.SUPABASE_KEY;
+
+const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false }
+}) : null;
+
+if (supabase) {
+  console.log("[Supabase] 🔌 Connected. Persistent database integration is active!");
+} else {
+  console.log("[Supabase] ℹ️ Credentials missing. Using local JSON files / in-memory fallback.");
+}
 
 let stripeClientInstance: Stripe | null = null;
 function getStripeClient(): Stripe | null {
@@ -345,14 +358,291 @@ async function generateUnifiedLLM({
 // Data storage setup
 const DB_DIR = path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "db.json");
+const BOT_CONFIG_FILE = path.join(DB_DIR, "bot-config.json");
+const ALERTS_FILE = path.join(DB_DIR, "alerts.json");
+const AGENT_MEMORY_FILE = path.join(DB_DIR, "agent-memory.json");
+const COMPUTER_LOGS_FILE = path.join(DB_DIR, "computer-logs.json");
 
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
+// Memory cache fallback for read-only environments like Cloudflare Workers
+const memoryDBCache: Record<string, string> = {};
+
+function safeReadFile(filePath: string, defaultValue: string = ""): string {
+  try {
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, "utf-8");
+    }
+  } catch (e) {}
+  return memoryDBCache[filePath] || defaultValue;
 }
 
-// Ensure database file exists
-if (!fs.existsSync(DB_FILE)) {
-  fs.writeFileSync(DB_FILE, "[]", "utf-8");
+function safeWriteFile(filePath: string, content: string): void {
+  try {
+    fs.writeFileSync(filePath, content, "utf-8");
+  } catch (e) {
+    memoryDBCache[filePath] = content;
+  }
+
+  // Push to Supabase asynchronously in the background
+  if (supabase) {
+    syncToSupabase(filePath, content).catch(err => {
+      console.error("[Supabase Background Sync Exception]:", err);
+    });
+  }
+}
+
+// Background sync helper to mirror local filesystem changes to Supabase
+async function syncToSupabase(filePath: string, content: string) {
+  if (!supabase) return;
+
+  try {
+    const data = JSON.parse(content);
+
+    // 1. CRM Opportunities file
+    if (filePath === DB_FILE) {
+      if (Array.isArray(data)) {
+        const dbOpps = data.map(o => ({
+          id: o.id,
+          title: o.title || "",
+          author: o.author || null,
+          source_platform: o.sourcePlatform || null,
+          source_url: o.sourceUrl || null,
+          classification: o.classification || "help_seeker",
+          problem_summary: o.problemSummary || null,
+          who_is_experiencing: o.whoIsExperiencing || null,
+          industry: o.industry || null,
+          evidence: o.evidence || null,
+          pain_level: o.painLevel || null,
+          pain_level_explanation: o.painLevelExplanation || null,
+          frequency: o.frequency || null,
+          current_solutions: o.currentSolutions || null,
+          possible_solution: o.possibleSolution || null,
+          mvp_idea: o.mvpIdea || null,
+          difficulty: o.difficulty || null,
+          difficulty_explanation: o.difficultyExplanation || null,
+          willingness_to_pay: o.willingnessToPay || null,
+          opportunity_score: o.opportunityScore || null,
+          response_draft: o.responseDraft || null,
+          suggested_questions: o.suggestedQuestions || [],
+          value_addition_ideas: o.valueAdditionIdeas || [],
+          status: o.status || "New",
+          notes: o.notes || null,
+          last_interaction: o.lastInteraction || null,
+          last_reply: o.lastReply || null,
+          contact_email: o.contactEmail || null,
+          estimated_deal_value: o.estimatedDealValue || null,
+          company_research: o.companyResearch || {},
+          solution_options: o.solutionOptions || [],
+          follow_up_sequences: o.followUpSequences || []
+        }));
+
+        if (dbOpps.length > 0) {
+          const { error } = await supabase.from("opportunities").upsert(dbOpps, { onConflict: "id" });
+          if (error) console.error("[Supabase Sync Error] Opportunities:", error);
+        }
+      }
+    } 
+    // 2. Bot Config file
+    else if (filePath === BOT_CONFIG_FILE) {
+      const dbConfig = {
+        id: "singleton",
+        scheduler_enabled: data.schedulerEnabled ?? true,
+        scheduler_interval_minutes: data.schedulerIntervalMinutes ?? 60,
+        email_alerts_enabled: data.emailAlertsEnabled ?? false,
+        alert_recipient_email: data.alertRecipientEmail || "upscaleyourbusiness.wv@gmail.com",
+        min_alert_score: data.minAlertScore ?? 75,
+        platforms: data.platforms || []
+      };
+
+      const { error } = await supabase.from("bot_config").upsert(dbConfig, { onConflict: "id" });
+      if (error) console.error("[Supabase Sync Error] Bot Config:", error);
+    } 
+    // 3. Alerts file
+    else if (filePath === ALERTS_FILE) {
+      if (Array.isArray(data)) {
+        const dbAlerts = data.map(a => ({
+          id: a.id,
+          timestamp: a.timestamp || new Date().toISOString(),
+          recipient: a.recipient || null,
+          subject: a.subject || null,
+          body: a.body || null,
+          opp_id: a.oppId || null,
+          opp_title: a.oppTitle || null,
+          opp_score: a.oppScore || null
+        }));
+
+        if (dbAlerts.length > 0) {
+          const { error } = await supabase.from("alerts").upsert(dbAlerts, { onConflict: "id" });
+          if (error) console.error("[Supabase Sync Error] Alerts:", error);
+        }
+      }
+    } 
+    // 4. Agent Memory file
+    else if (filePath === AGENT_MEMORY_FILE) {
+      // Upsert memory entries
+      if (Array.isArray(data.entries)) {
+        const dbEntries = data.entries.map((e: any) => ({
+          id: e.id || `entry-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          timestamp: e.timestamp || new Date().toISOString(),
+          tag: e.tag || null,
+          note: e.note || null,
+          prospect: e.prospect || null
+        }));
+
+        if (dbEntries.length > 0) {
+          const { error } = await supabase.from("agent_memory_entries").upsert(dbEntries, { onConflict: "id" });
+          if (error) console.error("[Supabase Sync Error] Memory Entries:", error);
+        }
+      }
+
+      // Upsert offline tasks (follow-ups)
+      if (Array.isArray(data.followUps)) {
+        const dbTasks = data.followUps.map((t: any) => ({
+          id: t.id || `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          task: t.task || "",
+          completed: t.completed ?? false,
+          timestamp: t.timestamp || new Date().toISOString()
+        }));
+
+        if (dbTasks.length > 0) {
+          const { error } = await supabase.from("offline_tasks").upsert(dbTasks, { onConflict: "id" });
+          if (error) console.error("[Supabase Sync Error] Offline Tasks:", error);
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Supabase Sync Exception] for ${path.basename(filePath)}:`, err.message || err);
+  }
+}
+
+// Startup sync helper to pull the latest state from Supabase on boot
+async function syncSupabaseOnStartup() {
+  if (!supabase) return;
+
+  console.log("[Supabase] 🔄 Synchronizing database tables with local cache...");
+  try {
+    // 1. Fetch Opportunities
+    const { data: dbOpps, error: oppsErr } = await supabase.from("opportunities").select("*");
+    if (oppsErr) {
+      console.error("[Supabase Startup Error] Failed to fetch opportunities:", oppsErr);
+    } else if (dbOpps && dbOpps.length > 0) {
+      const opps = dbOpps.map(o => ({
+        id: o.id,
+        title: o.title,
+        author: o.author,
+        sourcePlatform: o.source_platform,
+        sourceUrl: o.source_url,
+        classification: o.classification,
+        problemSummary: o.problem_summary,
+        whoIsExperiencing: o.who_is_experiencing,
+        industry: o.industry,
+        evidence: o.evidence,
+        painLevel: o.pain_level,
+        painLevelExplanation: o.pain_level_explanation,
+        frequency: o.frequency,
+        currentSolutions: o.current_solutions,
+        possibleSolution: o.possible_solution,
+        mvpIdea: o.mvp_idea,
+        difficulty: o.difficulty,
+        difficultyExplanation: o.difficulty_explanation,
+        willingnessToPay: o.willingness_to_pay,
+        opportunityScore: o.opportunity_score,
+        responseDraft: o.response_draft,
+        suggestedQuestions: o.suggested_questions || [],
+        valueAdditionIdeas: o.value_addition_ideas || [],
+        status: o.status,
+        notes: o.notes,
+        lastInteraction: o.last_interaction,
+        lastReply: o.last_reply,
+        contactEmail: o.contact_email,
+        estimatedDealValue: o.estimated_deal_value,
+        companyResearch: o.company_research || {},
+        solutionOptions: o.solution_options || [],
+        followUpSequences: o.follow_up_sequences || []
+      }));
+      fs.writeFileSync(DB_FILE, JSON.stringify(opps, null, 2), "utf-8");
+      memoryDBCache[DB_FILE] = JSON.stringify(opps, null, 2);
+      console.log(`[Supabase Startup] Loaded ${opps.length} opportunities.`);
+    }
+
+    // 2. Fetch Bot Config
+    const { data: dbConfigs, error: configErr } = await supabase.from("bot_config").select("*").eq("id", "singleton").single();
+    if (configErr && configErr.code !== "PGRST116") {
+      console.error("[Supabase Startup Error] Failed to fetch config:", configErr);
+    } else if (dbConfigs) {
+      const config = {
+        schedulerEnabled: dbConfigs.scheduler_enabled,
+        schedulerIntervalMinutes: dbConfigs.scheduler_interval_minutes,
+        emailAlertsEnabled: dbConfigs.email_alerts_enabled,
+        alertRecipientEmail: dbConfigs.alert_recipient_email,
+        minAlertScore: dbConfigs.min_alert_score,
+        platforms: dbConfigs.platforms || []
+      };
+      fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
+      memoryDBCache[BOT_CONFIG_FILE] = JSON.stringify(config, null, 2);
+      console.log("[Supabase Startup] Loaded bot configuration.");
+    }
+
+    // 3. Fetch Alerts
+    const { data: dbAlerts, error: alertsErr } = await supabase.from("alerts").select("*").order("timestamp", { ascending: false });
+    if (alertsErr) {
+      console.error("[Supabase Startup Error] Failed to fetch alerts:", alertsErr);
+    } else if (dbAlerts && dbAlerts.length > 0) {
+      const alerts = dbAlerts.map(a => ({
+        id: a.id,
+        timestamp: a.timestamp,
+        recipient: a.recipient,
+        subject: a.subject,
+        body: a.body,
+        oppId: a.opp_id,
+        oppTitle: a.opp_title,
+        oppScore: a.opp_score
+      }));
+      fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), "utf-8");
+      memoryDBCache[ALERTS_FILE] = JSON.stringify(alerts, null, 2);
+      console.log(`[Supabase Startup] Loaded ${alerts.length} historical alerts.`);
+    }
+
+    // 4. Fetch Agent Memory & Tasks
+    const { data: dbEntries, error: entriesErr } = await supabase.from("agent_memory_entries").select("*").order("timestamp", { ascending: false });
+    const { data: dbTasks, error: tasksErr } = await supabase.from("offline_tasks").select("*").order("timestamp", { ascending: false });
+    
+    if (!entriesErr && !tasksErr) {
+      const memory = {
+        summary: "Previous session context active in database.",
+        entries: (dbEntries || []).map((e: any) => ({
+          id: e.id,
+          timestamp: e.timestamp,
+          tag: e.tag,
+          note: e.note,
+          prospect: e.prospect
+        })),
+        followUps: (dbTasks || []).map((t: any) => ({
+          id: t.id,
+          task: t.task,
+          completed: t.completed,
+          timestamp: t.timestamp
+        }))
+      };
+      fs.writeFileSync(AGENT_MEMORY_FILE, JSON.stringify(memory, null, 2), "utf-8");
+      memoryDBCache[AGENT_MEMORY_FILE] = JSON.stringify(memory, null, 2);
+      console.log(`[Supabase Startup] Loaded agent memory (${memory.entries.length} entries, ${memory.followUps.length} follow-ups).`);
+    }
+
+  } catch (err: any) {
+    console.error("[Supabase Startup Sync Exception]:", err.message || err);
+  }
+}
+
+try {
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
+  }
+  // Ensure database file exists
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, "[]", "utf-8");
+  }
+} catch (err) {
+  console.warn("⚠️ [Storage Warning] Running on a read-only filesystem (Cloudflare Workers). Fallback to in-memory caching.");
 }
 
 // Pre-seeded opportunities are disabled as we strictly focus on real, live-fetched data
@@ -437,38 +727,32 @@ const getFallbackSolutionOptions = (opp: any): any[] => {
 };
 
 const loadOpportunities = (): any[] => {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = fs.readFileSync(DB_FILE, "utf-8");
-      const list = JSON.parse(data);
-      if (Array.isArray(list) && list.length > 0) {
-        // Automatically enrich opportunities with fullPostText and solution options if missing, and restore organic titles
-        return list.map(opp => {
-          let updated = { ...opp };
-          const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
-          if (backup) {
-            // Revert title to original non-technical organic forum titles
-            if (backup.id === "backup-reddit-1") updated.title = "Manual PDF entry";
-            else if (backup.id === "backup-reddit-2") updated.title = "utility reimbursement workaround";
-            else if (backup.id === "backup-reddit-3") updated.title = "scheduling / inventory sync";
-            else if (backup.id === "backup-reddit-4") updated.title = "freight shipping rates Shopify";
-            else if (backup.id === "backup-reddit-5") updated.title = "Sync schedules with home exercise software";
-            else updated.title = backup.title;
+  const data = safeReadFile(DB_FILE, "[]");
+  const list = JSON.parse(data);
+  if (Array.isArray(list) && list.length > 0) {
+    // Automatically enrich opportunities with fullPostText and solution options if missing, and restore organic titles
+    return list.map(opp => {
+      let updated = { ...opp };
+      const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
+      if (backup) {
+        // Revert title to original non-technical organic forum titles
+        if (backup.id === "backup-reddit-1") updated.title = "Manual PDF entry";
+        else if (backup.id === "backup-reddit-2") updated.title = "utility reimbursement workaround";
+        else if (backup.id === "backup-reddit-3") updated.title = "scheduling / inventory sync";
+        else if (backup.id === "backup-reddit-4") updated.title = "freight shipping rates Shopify";
+        else if (backup.id === "backup-reddit-5") updated.title = "Sync schedules with home exercise software";
+        else updated.title = backup.title;
 
-            updated.fullPostText = backup.text;
-          }
-          if (!updated.fullPostText) {
-            updated.fullPostText = updated.evidence || updated.problemSummary;
-          }
-          if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
-            updated.solutionOptions = getFallbackSolutionOptions(updated);
-          }
-          return updated;
-        });
+        updated.fullPostText = backup.text;
       }
-    }
-  } catch (error) {
-    console.error("Error reading database file, falling back to seed data:", error);
+      if (!updated.fullPostText) {
+        updated.fullPostText = updated.evidence || updated.problemSummary;
+      }
+      if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
+        updated.solutionOptions = getFallbackSolutionOptions(updated);
+      }
+      return updated;
+    });
   }
   
   // Enrich seed opportunities before saving
@@ -483,7 +767,7 @@ const loadOpportunities = (): any[] => {
 
 const saveOpportunities = (data: any[]) => {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
+    safeWriteFile(DB_FILE, JSON.stringify(data, null, 2));
   } catch (error) {
     console.error("Error writing database file:", error);
   }
@@ -744,8 +1028,8 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
       1. "responseDraft": A highly targeted response message written in a humble, helpful, expert tone. It must:
          - Speak directly to the user (e.g. "Hi [Author]" or a platform-appropriate greeting).
          - Reference their specific situation and details (e.g., their workflow bottleneck, their EHR pain, their zoning headaches).
-         - Provide a clear, free tip, strategy, or open-source recommendation to prove you know your stuff, without pushing any paid solution.
-         - Mention that you are working on/thinking about a lightweight solo project to solve this exact bottleneck.
+         - Proactively offer a specific, free, simple solution template (like a custom Google Sheets formula, a basic copy-pasteable script, or a simple workflow blueprint) to solve their problem immediately for free to build trust.
+         - Mention that you are working on/thinking about a lightweight project to automate this exact bottleneck.
          - Ask a single, high-intent open-ended question that makes it easy for them to reply.
          - NO sales talk, NO pricing, NO aggressive call-to-action.
       2. "suggestedQuestions": An array of 2-3 deep-dive technical/process questions to ask later to understand their problem better.
@@ -817,7 +1101,7 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
         "difficultyExplanation": "Technical details on what makes it easy/hard to build",
         "willingnessToPay": "A detailed estimation of what they would pay (e.g., '$50-$100/mo' or 'Pay-per-use') with justification",
         "opportunityScore": 75, // A number from 0 to 100 representing signal strength (pain level, willingness to pay, ability to build)
-        "responseDraft": "A personalized, trust-building response draft starting with a helpful greeting, a free value tip, and an open-ended process question.",
+        "responseDraft": "A personalized, trust-building response draft starting with a helpful greeting, offering a simple copy-pasteable free solution template or formula, and an open-ended process question.",
         "suggestedQuestions": ["Question 1?", "Question 2?"],
         "valueAdditionIdeas": ["Idea 1", "Idea 2"]
       }
@@ -2207,7 +2491,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
         "difficultyExplanation": "Technical details on what makes it easy/hard to build",
         "willingnessToPay": "A detailed estimation of what they would pay (e.g., '$50-$100/mo') with justification based on business value",
         "opportunityScore": 82, // Score from 0 to 100 based on pain, difficulty, and willingness to pay (ensure help_seeker_min score >= 60)
-        "responseDraft": "A highly personalized, empathetic, helpful outreach message that offers free advice or a diagnostic question, avoiding sales language.",
+        "responseDraft": "A highly personalized, empathetic, helpful outreach message that offers a free, copy-pasteable solution template or simple formula, and a diagnostic question, avoiding sales language.",
         "suggestedQuestions": ["Question 1", "Question 2"],
         "valueAdditionIdeas": ["Idea 1", "Idea 2"]
       }
@@ -2388,7 +2672,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
         "difficultyExplanation": "Technical details on what makes it easy/hard to build",
         "willingnessToPay": "A detailed estimation of what they would pay (e.g., '$50-$100/mo' or 'Pay-per-use') with justification",
         "opportunityScore": 75, // A number from 0 to 100 representing signal strength (pain level, willingness to pay, ability to build)
-        "responseDraft": "A personalized, trust-building response draft starting with a helpful greeting, a free value tip, and an open-ended process question.",
+        "responseDraft": "A personalized, trust-building response draft starting with a helpful greeting, offering a simple copy-pasteable free solution template or formula, and an open-ended process question.",
         "suggestedQuestions": ["Question 1?", "Question 2?"],
         "valueAdditionIdeas": ["Idea 1", "Idea 2"]
       }
@@ -2438,18 +2722,17 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
 // Bot Fleet & Crawler Strategy Storage & APIs
 // ==========================================
 
-const BOT_CONFIG_FILE = path.join(DB_DIR, "bot-config.json");
-const ALERTS_FILE = path.join(DB_DIR, "alerts.json");
+
 
 if (!fs.existsSync(ALERTS_FILE)) {
-  fs.writeFileSync(ALERTS_FILE, "[]", "utf-8");
+  safeWriteFile(ALERTS_FILE, "[]");
 }
 
 const defaultBotConfig = {
   schedulerEnabled: true,
   schedulerIntervalMinutes: 60,
   emailAlertsEnabled: false,
-  alertRecipientEmail: "developer@example.com",
+  alertRecipientEmail: process.env.ALERT_RECIPIENT_EMAIL || "upscaleyourbusiness.wv@gmail.com",
   minAlertScore: 75,
   platforms: [
     {
@@ -2543,55 +2826,49 @@ const defaultBotConfig = {
 };
 
 const loadBotConfig = () => {
-  try {
-    if (fs.existsSync(BOT_CONFIG_FILE)) {
-      const data = fs.readFileSync(BOT_CONFIG_FILE, "utf-8");
-      const config = JSON.parse(data);
-      if (config && Array.isArray(config.platforms)) {
-        // Filter out developer platforms (Hacker News, GitHub, Stack Exchange, Mastodon) to preserve small-business only scope
-        config.platforms = config.platforms.filter((p: any) => !["hn", "github", "stackexchange", "mastodon"].includes(p.platformId));
+  const data = safeReadFile(BOT_CONFIG_FILE, "{}");
+  const config = JSON.parse(data);
+  if (config && Array.isArray(config.platforms)) {
+    // Filter out developer platforms (Hacker News, GitHub, Stack Exchange, Mastodon) to preserve small-business only scope
+    config.platforms = config.platforms.filter((p: any) => !["hn", "github", "stackexchange", "mastodon"].includes(p.platformId));
 
-        // Merge missing default values to self-heal schema
-        if (config.schedulerEnabled === undefined) config.schedulerEnabled = defaultBotConfig.schedulerEnabled;
-        if (config.schedulerIntervalMinutes === undefined) config.schedulerIntervalMinutes = defaultBotConfig.schedulerIntervalMinutes;
-        if (config.emailAlertsEnabled === undefined) config.emailAlertsEnabled = defaultBotConfig.emailAlertsEnabled;
-        if (config.alertRecipientEmail === undefined) config.alertRecipientEmail = defaultBotConfig.alertRecipientEmail;
-        if (config.minAlertScore === undefined) config.minAlertScore = defaultBotConfig.minAlertScore;
+    // Merge missing default values to self-heal schema
+    if (config.schedulerEnabled === undefined) config.schedulerEnabled = defaultBotConfig.schedulerEnabled;
+    if (config.schedulerIntervalMinutes === undefined) config.schedulerIntervalMinutes = defaultBotConfig.schedulerIntervalMinutes;
+    if (config.emailAlertsEnabled === undefined) config.emailAlertsEnabled = defaultBotConfig.emailAlertsEnabled;
+    if (config.alertRecipientEmail === undefined) config.alertRecipientEmail = defaultBotConfig.alertRecipientEmail;
+    if (config.minAlertScore === undefined) config.minAlertScore = defaultBotConfig.minAlertScore;
 
-        // Upgrade/Heal outdated targets in existing saved configs
-        for (const plat of config.platforms) {
-          if (plat.platformId === "discourse" && Array.isArray(plat.targets)) {
-            plat.targets = plat.targets.map((t: any) => {
-              if (t.urlOrPath === "community.airtable.com") {
-                return { id: "discourse-2", name: "UiPath Enterprise Automation", urlOrPath: "forum.uipath.com", isEnabled: true };
-              }
-              return t;
-            });
+    // Upgrade/Heal outdated targets in existing saved configs
+    for (const plat of config.platforms) {
+      if (plat.platformId === "discourse" && Array.isArray(plat.targets)) {
+        plat.targets = plat.targets.map((t: any) => {
+          if (t.urlOrPath === "community.airtable.com") {
+            return { id: "discourse-2", name: "UiPath Enterprise Automation", urlOrPath: "forum.uipath.com", isEnabled: true };
           }
-          if (plat.platformId === "rss" && Array.isArray(plat.targets)) {
-            plat.targets = plat.targets.map((t: any) => {
-              if (t.urlOrPath.includes("community.shopify.com/c/shopify-discussion/category-id/shopify-discussion.rss")) {
-                return { id: "rss-1", name: "Small Business Trends Feed", urlOrPath: "https://smallbiztrends.com/feed/", isEnabled: true };
-              }
-              return t;
-            });
+          return t;
+        });
+      }
+      if (plat.platformId === "rss" && Array.isArray(plat.targets)) {
+        plat.targets = plat.targets.map((t: any) => {
+          if (t.urlOrPath.includes("community.shopify.com/c/shopify-discussion/category-id/shopify-discussion.rss")) {
+            return { id: "rss-1", name: "Small Business Trends Feed", urlOrPath: "https://smallbiztrends.com/feed/", isEnabled: true };
           }
-        }
-
-        // Dynamic self-heal for all platforms
-        for (const defaultPlat of defaultBotConfig.platforms) {
-          const hasPlat = config.platforms.some((p: any) => p.platformId === defaultPlat.platformId);
-          if (!hasPlat) {
-            config.platforms.push(defaultPlat);
-          }
-        }
-        
-        saveBotConfig(config);
-        return config;
+          return t;
+        });
       }
     }
-  } catch (error) {
-    console.error("Error reading bot config file:", error);
+
+    // Dynamic self-heal for all platforms
+    for (const defaultPlat of defaultBotConfig.platforms) {
+      const hasPlat = config.platforms.some((p: any) => p.platformId === defaultPlat.platformId);
+      if (!hasPlat) {
+        config.platforms.push(defaultPlat);
+      }
+    }
+    
+    saveBotConfig(config);
+    return config;
   }
   // Write default config
   saveBotConfig(defaultBotConfig);
@@ -2600,19 +2877,17 @@ const loadBotConfig = () => {
 
 const saveBotConfig = (data: any) => {
   try {
-    fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(data, null, 2), "utf-8");
+    safeWriteFile(BOT_CONFIG_FILE, JSON.stringify(data, null, 2));
   } catch (error) {
     console.error("Error writing bot config file:", error);
   }
 };
 
-const AGENT_MEMORY_FILE = path.join(DB_DIR, "agent-memory.json");
+
 
 const loadAgentMemory = () => {
   try {
-    if (fs.existsSync(AGENT_MEMORY_FILE)) {
-      return JSON.parse(fs.readFileSync(AGENT_MEMORY_FILE, "utf-8"));
-    }
+    return JSON.parse(safeReadFile(AGENT_MEMORY_FILE, "[]"));
   } catch (error) {
     console.error("Error reading agent memory file:", error);
   }
@@ -2624,7 +2899,7 @@ const loadAgentMemory = () => {
 
 const saveAgentMemory = (data: any) => {
   try {
-    fs.writeFileSync(AGENT_MEMORY_FILE, JSON.stringify(data, null, 2), "utf-8");
+    safeWriteFile(AGENT_MEMORY_FILE, JSON.stringify(data, null, 2));
   } catch (error) {
     console.error("Error writing agent memory file:", error);
   }
@@ -3127,13 +3402,11 @@ Return JSON:
   }
 });
 
-const COMPUTER_LOGS_FILE = path.join(DB_DIR, "computer-logs.json");
+
 
 const loadComputerLogs = (): string[] => {
   try {
-    if (fs.existsSync(COMPUTER_LOGS_FILE)) {
-      return JSON.parse(fs.readFileSync(COMPUTER_LOGS_FILE, "utf-8"));
-    }
+    return JSON.parse(safeReadFile(COMPUTER_LOGS_FILE, "[]"));
   } catch (error) {
     console.error("Error reading computer logs file:", error);
   }
@@ -3142,7 +3415,7 @@ const loadComputerLogs = (): string[] => {
 
 const saveComputerLogs = (logs: string[]) => {
   try {
-    fs.writeFileSync(COMPUTER_LOGS_FILE, JSON.stringify(logs, null, 2), "utf-8");
+    safeWriteFile(COMPUTER_LOGS_FILE, JSON.stringify(logs, null, 2));
   } catch (error) {
     console.error("Error writing computer logs file:", error);
   }
@@ -3260,7 +3533,113 @@ function getPublishedBaseUrl(req?: any): string {
   return PUBLISHED_APP_URL;
 }
 
-// Dual Email Dispatch helper with automatic n8n <-> Native Web App fallback
+// Helper to send real-time alerts via Telegram Bot API with optional 1-Click Action button
+async function sendTelegramAlert(text: string, actionUrl?: string): Promise<{ success: boolean; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    console.warn("[Telegram Alert] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables. Alert skipped.");
+    return { success: false, error: "Telegram credentials not configured in environment." };
+  }
+
+  try {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const body: any = {
+      chat_id: chatId,
+      text: text,
+      parse_mode: "HTML"
+    };
+
+    if (actionUrl) {
+      body.reply_markup = {
+        inline_keyboard: [
+          [
+            {
+              text: "⚡ Approve Outreach / 1-Click",
+              url: actionUrl
+            }
+          ]
+        ]
+      };
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (response.ok) {
+      console.log("[Telegram Alert] Message dispatched successfully to chat ID:", chatId);
+      return { success: true };
+    } else {
+      const errText = await response.text();
+      console.error(`[Telegram Alert] Error sending alert. Status: ${response.status}. Error:`, errText);
+      return { success: false, error: `Telegram responded with status ${response.status}: ${errText}` };
+    }
+  } catch (error: any) {
+    console.error("[Telegram Alert] Request failed:", error);
+    return { success: false, error: error.message || String(error) };
+  }
+}
+
+// Helper to send emails via Mailgun REST API using native fetch and btoa encoding
+async function sendMailgunEmail(params: {
+  to: string;
+  subject: string;
+  bodyText: string;
+  html?: string;
+}): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const apiKey = process.env.MAILGUN_API_KEY;
+  const domain = process.env.MAILGUN_DOMAIN;
+  const sender = process.env.MAILGUN_SENDER || `Opportunity Radar <mailgun@${domain || "example.com"}>`;
+
+  if (!apiKey || !domain) {
+    console.warn("[Mailgun] Missing MAILGUN_API_KEY or MAILGUN_DOMAIN in environment variables. Email send skipped.");
+    return { success: false, error: "Mailgun credentials not configured in environment." };
+  }
+
+  try {
+    const auth = btoa(`api:${apiKey}`);
+    const url = `https://api.mailgun.net/v3/${domain}/messages`;
+
+    const formData = new URLSearchParams();
+    formData.append("from", sender);
+    formData.append("to", params.to);
+    formData.append("subject", params.subject);
+    formData.append("text", params.bodyText);
+    if (params.html) {
+      formData.append("html", params.html);
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: formData.toString()
+    });
+
+    if (response.ok) {
+      const data: any = await response.json();
+      console.log(`[Mailgun] Email sent successfully to ${params.to}. Message ID:`, data.id);
+      return { success: true, messageId: data.id };
+    } else {
+      const errorText = await response.text();
+      console.error(`[Mailgun] Error sending email. Status: ${response.status}. Error:`, errorText);
+      return { success: false, error: `Mailgun responded with status ${response.status}: ${errorText}` };
+    }
+  } catch (error: any) {
+    console.error("[Mailgun] Request failed:", error);
+    return { success: false, error: error.message || String(error) };
+  }
+}
+
+// Dual Email Dispatch helper with automatic Mailgun -> n8n Webhook fallback
 async function sendDualEmailWithFallback(params: {
   to: string;
   subject: string;
@@ -3276,52 +3655,71 @@ async function sendDualEmailWithFallback(params: {
   // Construct 1-Click action link pointing strictly to the published production app URL
   const encodedTo = encodeURIComponent(to);
   const encodedSubject = encodeURIComponent(subject);
-  const encodedContent = encodeURIComponent(bodyText.substring(0, 500));
   const oneClickLink = `${baseUrl}/api/one-click/execute?action=${actionType}&id=${opportunityId || "opp-gen"}&to=${encodedTo}&platform=${encodeURIComponent(platform)}&subject=${encodedSubject}`;
 
   const fullText = `${bodyText}\n\n---\n⚡ 1-Click Direct Action (Published Production App):\nPost / Approve Now: ${oneClickLink}`;
 
   const logs = loadComputerLogs();
   let primarySuccess = false;
-  let methodUsed = "n8n Webhook";
+  let methodUsed = "Native Mailgun Engine";
   let fallbackActivated = false;
 
-  // 1. Primary Attempt: n8n Webhook Trigger
-  const n8nWebhookUrl = process.env.N8N_EMAIL_WEBHOOK_URL || "https://numbly-clapping-filling.ngrok-free.dev/webhook/send-email";
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
-    const n8nRes = await fetchWithNgrokFallback(n8nWebhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to,
-        subject,
-        message: fullText,
-        oneClickLink,
-        opportunityId,
-        platform,
-        source: "Opportunity Radar (Dual Dispatch Engine)"
-      }),
-      signal: controller.signal
+  // 1. Primary Attempt: Native Mailgun Email Dispatch
+  const apiKey = process.env.MAILGUN_API_KEY;
+  const domain = process.env.MAILGUN_DOMAIN;
+  if (apiKey && domain) {
+    const mgResult = await sendMailgunEmail({
+      to,
+      subject,
+      bodyText: fullText
     });
-    clearTimeout(timeoutId);
-
-    if (n8nRes.ok) {
+    if (mgResult.success) {
       primarySuccess = true;
-      logs.unshift(`[${new Date().toISOString()}] 📤 DUAL DISPATCH [PRIMARY: n8n Webhook]: Email sent successfully to ${to}`);
+      logs.unshift(`[${new Date().toISOString()}] 📤 DUAL DISPATCH [PRIMARY: Mailgun API]: Email sent successfully to ${to}`);
     } else {
-      console.warn(`[Dual Dispatch] n8n Webhook returned ${n8nRes.status}. Triggering Native Web App Fallback...`);
+      console.warn(`[Dual Dispatch] Mailgun send failed (${mgResult.error}). Triggering n8n Webhook Fallback...`);
     }
-  } catch (err: any) {
-    console.warn(`[Dual Dispatch] n8n Webhook connection failed (${err.message || err}). Activating Native Web App Fallback...`);
+  } else {
+    console.warn(`[Dual Dispatch] Mailgun credentials not configured. Triggering n8n Webhook Fallback...`);
   }
 
-  // 2. Fallback Attempt: Native Web App Gmail / Direct Dispatch
+  // 2. Fallback Attempt: n8n Webhook Trigger
+  let fallbackSuccess = false;
   if (!primarySuccess) {
     fallbackActivated = true;
-    methodUsed = "Native Web App Engine";
-    logs.unshift(`[${new Date().toISOString()}] 🔄 DUAL DISPATCH [FALLBACK ACTIVATED]: n8n offline/unreachable. Dispatched directly via Native Web App Gmail engine to ${to}`);
+    methodUsed = "n8n Webhook";
+    const n8nWebhookUrl = process.env.N8N_EMAIL_WEBHOOK_URL || "https://numbly-clapping-filling.ngrok-free.dev/webhook/send-email";
+    
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
+      const n8nRes = await fetchWithNgrokFallback(n8nWebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject,
+          message: fullText,
+          oneClickLink,
+          opportunityId,
+          platform,
+          source: "Opportunity Radar (Dual Dispatch Engine)"
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (n8nRes.ok) {
+        fallbackSuccess = true;
+        logs.unshift(`[${new Date().toISOString()}] 🔄 DUAL DISPATCH [FALLBACK ACTIVATED]: Mailgun failed/missing. Dispatched successfully via n8n Webhook to ${to}`);
+      } else {
+        methodUsed = "Failed Dispatch Engine";
+        logs.unshift(`[${new Date().toISOString()}] ❌ DUAL DISPATCH [FAILED]: Both Mailgun and n8n fallback failed.`);
+      }
+    } catch (err: any) {
+      methodUsed = "Failed Dispatch Engine";
+      logs.unshift(`[${new Date().toISOString()}] ❌ DUAL DISPATCH [FAILED]: Both Mailgun and n8n fallback failed. n8n error: ${err.message || err}`);
+    }
   }
 
   saveComputerLogs(logs.slice(0, 200));
@@ -3333,13 +3731,13 @@ async function sendDualEmailWithFallback(params: {
     id: `mem-${Date.now()}`,
     timestamp: new Date().toISOString(),
     tag: `Dual Dispatch: ${methodUsed}`,
-    note: `Dispatched outreach to ${to} (${subject}). 1-Click Link: ${oneClickLink}. Fallback Used: ${fallbackActivated ? "YES" : "NO"}`,
+    note: `Dispatched outreach to ${to} (${subject}). 1-Click Link: ${oneClickLink}. Fallback Used: ${fallbackActivated ? "YES" : "NO"} (Success: ${primarySuccess || fallbackSuccess ? "YES" : "NO"})`,
     prospect: to
   });
   saveAgentMemory(memory);
 
   return {
-    success: true,
+    success: primarySuccess || fallbackSuccess,
     methodUsed,
     fallbackActivated,
     oneClickLink,
@@ -3541,10 +3939,8 @@ app.get("/api/bot-config", (req, res) => {
 // GET /api/alerts
 app.get("/api/alerts", (req, res) => {
   try {
-    if (fs.existsSync(ALERTS_FILE)) {
-      const data = fs.readFileSync(ALERTS_FILE, "utf-8");
-      return res.json(JSON.parse(data));
-    }
+    const data = safeReadFile(ALERTS_FILE, "[]");
+    return res.json(JSON.parse(data));
   } catch (error) {
     console.error("Error reading alerts file:", error);
   }
@@ -3554,7 +3950,7 @@ app.get("/api/alerts", (req, res) => {
 // DELETE /api/alerts
 app.delete("/api/alerts", (req, res) => {
   try {
-    fs.writeFileSync(ALERTS_FILE, "[]", "utf-8");
+    safeWriteFile(ALERTS_FILE, "[]");
     res.json({ success: true });
   } catch (error) {
     console.error("Error clearing alerts file:", error);
@@ -4397,7 +4793,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
 
     // Trigger email alerts if enabled
     if (config.emailAlertsEnabled) {
-      const alertRecipient = config.alertRecipientEmail || "developer@example.com";
+      const alertRecipient = config.alertRecipientEmail || process.env.ALERT_RECIPIENT_EMAIL || "upscaleyourbusiness.wv@gmail.com";
       const minScore = config.minAlertScore || 75;
       
       const alertsToTrigger = enrichedOpps.filter(o => (o.opportunityScore || 0) >= minScore);
@@ -4405,9 +4801,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
         logs.push(`[Email Alerts] 📧 Triggering email notification alerts for ${alertsToTrigger.length} high-potential opportunities...`);
         try {
           let existingAlerts = [];
-          if (fs.existsSync(ALERTS_FILE)) {
-            existingAlerts = JSON.parse(fs.readFileSync(ALERTS_FILE, "utf-8"));
-          }
+      existingAlerts = JSON.parse(safeReadFile(ALERTS_FILE, "[]"));
           
           for (const opp of alertsToTrigger) {
             const emailSubject = `🚨 New [${opp.industry || "Business Pain"}] Opportunity Discovered (Score: ${opp.opportunityScore}/100)`;
@@ -4459,14 +4853,47 @@ ${opp.responseDraft}
               oppScore: opp.opportunityScore
             });
             
-            console.log(`[Alert Delivered] Email simulated successfully to ${alertRecipient}.\nSubject: ${emailSubject}`);
-            logs.push(`[Email Alerts] ✅ Alert email sent to ${alertRecipient} for "${opp.title}" (Score: ${opp.opportunityScore})`);
+            const emailResult = await sendMailgunEmail({
+              to: alertRecipient,
+              subject: emailSubject,
+              bodyText: emailBody
+            });
+
+            if (emailResult.success) {
+              console.log(`[Alert Delivered] Email sent successfully to ${alertRecipient}.\nSubject: ${emailSubject}`);
+              logs.push(`[Email Alerts] ✅ Alert email sent to ${alertRecipient} for "${opp.title}" (Score: ${opp.opportunityScore})`);
+            } else {
+              console.error(`[Alert Failed] Email dispatch failed to ${alertRecipient}: ${emailResult.error}`);
+              logs.push(`[Email Alerts] ❌ Alert email failed for "${opp.title}": ${emailResult.error || "Unknown error"}`);
+            }
+
+            // Dispatch Telegram notification alert if bot credentials are configured
+            const baseUrl = PUBLISHED_APP_URL;
+            const encodedTo = encodeURIComponent(opp.contactEmail || opp.author || "prospect");
+            const encodedSubject = encodeURIComponent(`Outreach response for: ${opp.title}`);
+            const actionUrl = `${baseUrl}/api/one-click/execute?action=outreach&id=${opp.id || opp.author}&to=${encodedTo}&platform=${encodeURIComponent(opp.sourcePlatform || "Social")}&subject=${encodedSubject}`;
+
+            const telegramMessage = 
+              `🚨 <b>New Opportunity Discovered (Score: ${opp.opportunityScore}/100)</b>\n\n` +
+              `📌 <b>Title</b>: ${opp.title}\n` +
+              `📡 <b>Platform</b>: ${opp.sourcePlatform}\n` +
+              `👤 <b>Author</b>: @${opp.author}\n` +
+              `🔥 <b>Pain Score</b>: ${opp.painLevel}\n\n` +
+              `💬 <b>Bottleneck</b>: <i>"${opp.problemSummary}"</i>\n\n` +
+              `💡 <b>MVP Idea</b>: ${opp.mvpIdea}`;
+
+            const tgResult = await sendTelegramAlert(telegramMessage, actionUrl);
+            if (tgResult.success) {
+              logs.push(`[Telegram Alerts] ✅ Telegram alert sent successfully.`);
+            } else {
+              logs.push(`[Telegram Alerts] ⚠️ Telegram alert skipped/failed: ${tgResult.error || "no credentials"}`);
+            }
           }
           
-          fs.writeFileSync(ALERTS_FILE, JSON.stringify(existingAlerts.slice(0, 50), null, 2), "utf-8");
+          safeWriteFile(ALERTS_FILE, JSON.stringify(existingAlerts.slice(0, 50), null, 2));
         } catch (alertErr) {
-          console.error("Error generating simulated alerts:", alertErr);
-          logs.push(`[Email Alerts] ⚠️ Failed to deliver simulated alert notifications.`);
+          console.error("Error generating alerts:", alertErr);
+          logs.push(`[Email Alerts] ⚠️ Failed to deliver alert notifications.`);
         }
       }
     }
@@ -4595,6 +5022,24 @@ async function executeOfflineTasks() {
           opportunities.push(newOpp);
           saveOpportunities(opportunities);
           logs.push(`[Offline Worker] Saved draft opportunity to pipeline.`);
+
+          // Proactively alert user on Telegram about the newly drafted document
+          const encodedTo = encodeURIComponent(newOpp.author || "prospect");
+          const encodedSubject = encodeURIComponent(`Outreach response for: ${newOpp.title}`);
+          const actionUrl = `${PUBLISHED_APP_URL}/api/one-click/execute?action=outreach&id=${newOpp.id}&to=${encodedTo}&platform=Email&subject=${encodedSubject}`;
+
+          const telegramMessage = 
+            `🧠 <b>P.A.C. Offline Task Completed</b>\n\n` +
+            `📝 <b>Draft Prepared</b>: "${doc.title}"\n` +
+            `📋 <b>Task</b>: ${task.task}\n\n` +
+            `💬 <b>Summary</b>: <i>"${result.notes || 'Outreach draft prepared offline.'}"</i>`;
+
+          const tgRes = await sendTelegramAlert(telegramMessage, actionUrl);
+          if (tgRes.success) {
+            logs.push(`[Offline Worker] ✅ Telegram notification sent successfully.`);
+          } else {
+            logs.push(`[Offline Worker] ⚠️ Telegram notification skipped/failed: ${tgRes.error || "no credentials"}`);
+          }
         }
 
         if (result.completed) {
@@ -5895,7 +6340,12 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
 
 
 // Vite / Static Assets configuration
-if (process.env.NODE_ENV !== "production") {
+const isWorker = typeof globalThis.WebSocketPair !== "undefined";
+
+if (!isWorker && process.env.NODE_ENV !== "production") {
+  const viteModule = "vite";
+  // @ts-ignore
+  const { createServer: createViteServer } = await import(viteModule);
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: "spa",
@@ -5909,176 +6359,278 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-const server = app.listen(PORT, "0.0.0.0", () => {
+const HOST = process.env.HOST || "127.0.0.1";
+const server = app.listen(PORT, HOST, async () => {
   console.log(`AI Opportunity Discovery Engine running on http://localhost:${PORT}`);
-  initScheduler(); // Start the continuous background daemon on boot!
-});
-
-// Setup Server-Side WebSocket Proxy to Deepgram to bypass sandbox / CSP constraints
-const wss = new WebSocketServer({ noServer: true });
-
-server.on("upgrade", (request, socket, head) => {
-  const { pathname } = new URL(request.url || "", `http://${request.headers.host}`);
-  if (pathname === "/api/deepgram/ws") {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit("connection", ws, request);
-    });
-  }
-});
-
-wss.on("connection", async (ws, request) => {
-  const urlObj = new URL(request.url || "", `http://${request.headers.host}`);
-  let apiKey = urlObj.searchParams.get("key");
-  let agentId = urlObj.searchParams.get("agent_id");
-
-  if (!apiKey) {
-    apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
-  }
-
-  if (!apiKey) {
-    console.error("[SERVER-WS-PROXY] Denied: No Deepgram API Key available.");
-    ws.close(4000, "Deepgram API key is missing. Please set it in Settings.");
-    return;
-  }
-
-  if (!agentId) {
-    agentId = await getOrFetchDeepgramAgentId(apiKey);
-  }
-
-  // Extract and sanitize query parameters from incoming request
-  let rawUtteranceEnd = urlObj.searchParams.get("utterance_end_ms");
-  let sanitizedUtteranceEndMs = 1000;
-  if (rawUtteranceEnd) {
-    const parsedVal = parseInt(rawUtteranceEnd, 10);
-    // Deepgram requires utterance_end_ms to be at least 1000ms. Values below 1000 cause HTTP 400 rejection before connection.
-    if (!isNaN(parsedVal)) {
-      sanitizedUtteranceEndMs = Math.max(1000, parsedVal);
-    }
-  }
-
-  // Deepgram Conversational Voice Agent endpoint: wss://agent.deepgram.com/v1/agent/converse
-  const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
-
-  console.log(`[SERVER-WS-PROXY] Connecting strictly to Deepgram Conversational Voice Agent: ${targetUrl}`);
   
-  let currentDgSocket: WSWebSocket | null = null;
-  let isClosed = false;
-  let keepAliveTimer: NodeJS.Timeout | null = null;
-  const pendingBuffer: Array<{ data: any; isBinary: boolean }> = [];
+  if (supabase) {
+    await syncSupabaseOnStartup();
+  }
+  
+  if (!isWorker) {
+    initScheduler(); // Start the continuous background daemon on boot!
+  }
+});
 
-  const cleanup = (code: number, reason: string) => {
-    if (isClosed) return;
-    isClosed = true;
-    if (keepAliveTimer) {
-      clearInterval(keepAliveTimer);
-      keepAliveTimer = null;
-    }
-    console.log(`[SERVER-WS-PROXY] Connection cleanup. Code: ${code}, Reason: ${reason}`);
-    
-    try {
-      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
-        ws.close(code, reason);
-      }
-    } catch (e) {}
+if (!isWorker) {
+  // Setup Server-Side WebSocket Proxy to Deepgram to bypass sandbox / CSP constraints
+  const wss = new WebSocketServer({ noServer: true });
 
-    try {
-      if (currentDgSocket && (currentDgSocket.readyState === currentDgSocket.OPEN || currentDgSocket.readyState === currentDgSocket.CONNECTING)) {
-        currentDgSocket.close(code, reason);
-      }
-    } catch (e) {}
-  };
-
-  // Start server-side KeepAlive interval (every 3 seconds) to ensure Deepgram socket never times out
-  keepAliveTimer = setInterval(() => {
-    if (!isClosed && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
-      try {
-        currentDgSocket.send(JSON.stringify({ type: "KeepAlive" }));
-      } catch (e) {}
-    }
-  }, 3000);
-
-  currentDgSocket = new WSWebSocket(targetUrl, {
-    headers: {
-      "Authorization": `Token ${apiKey}`
+  server.on("upgrade", (request, socket, head) => {
+    const { pathname } = new URL(request.url || "", `http://${request.headers.host}`);
+    if (pathname === "/api/deepgram/ws") {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
+      });
     }
   });
 
-  currentDgSocket.on("open", () => {
-    console.log("[SERVER-WS-PROXY] Deepgram Conversational Voice Agent connection open & ready!");
-    // Flush buffered messages (e.g. initial Settings frame) sent by client before Deepgram handshake finished
-    while (pendingBuffer.length > 0) {
-      const item = pendingBuffer.shift();
-      if (item && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
-        if (item.isBinary) {
-          currentDgSocket.send(item.data);
-        } else {
-          currentDgSocket.send(item.data.toString());
+  wss.on("connection", async (ws, request) => {
+    const urlObj = new URL(request.url || "", `http://${request.headers.host}`);
+    let apiKey = urlObj.searchParams.get("key");
+    let agentId = urlObj.searchParams.get("agent_id");
+
+    if (!apiKey) {
+      apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+    }
+
+    if (!apiKey) {
+      console.error("[SERVER-WS-PROXY] Denied: No Deepgram API Key available.");
+      ws.close(4000, "Deepgram API key is missing. Please set it in Settings.");
+      return;
+    }
+
+    if (!agentId) {
+      agentId = await getOrFetchDeepgramAgentId(apiKey);
+    }
+
+    // Extract and sanitize query parameters from incoming request
+    let rawUtteranceEnd = urlObj.searchParams.get("utterance_end_ms");
+    let sanitizedUtteranceEndMs = 1000;
+    if (rawUtteranceEnd) {
+      const parsedVal = parseInt(rawUtteranceEnd, 10);
+      // Deepgram requires utterance_end_ms to be at least 1000ms. Values below 1000 cause HTTP 400 rejection before connection.
+      if (!isNaN(parsedVal)) {
+        sanitizedUtteranceEndMs = Math.max(1000, parsedVal);
+      }
+    }
+
+    // Deepgram Conversational Voice Agent endpoint: wss://agent.deepgram.com/v1/agent/converse
+    const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
+
+    console.log(`[SERVER-WS-PROXY] Connecting strictly to Deepgram Conversational Voice Agent: ${targetUrl}`);
+    
+    let currentDgSocket: WSWebSocket | null = null;
+    let isClosed = false;
+    let keepAliveTimer: NodeJS.Timeout | null = null;
+    const pendingBuffer: Array<{ data: any; isBinary: boolean }> = [];
+
+    const cleanup = (code: number, reason: string) => {
+      if (isClosed) return;
+      isClosed = true;
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
+      console.log(`[SERVER-WS-PROXY] Connection cleanup. Code: ${code}, Reason: ${reason}`);
+      
+      try {
+        if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+          ws.close(code, reason);
+        }
+      } catch (e) {}
+
+      try {
+        if (currentDgSocket && (currentDgSocket.readyState === currentDgSocket.OPEN || currentDgSocket.readyState === currentDgSocket.CONNECTING)) {
+          currentDgSocket.close(code, reason);
+        }
+      } catch (e) {}
+    };
+
+    // Start server-side KeepAlive interval (every 3 seconds) to ensure Deepgram socket never times out
+    keepAliveTimer = setInterval(() => {
+      if (!isClosed && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
+        try {
+          currentDgSocket.send(JSON.stringify({ type: "KeepAlive" }));
+        } catch (e) {}
+      }
+    }, 3000);
+
+    currentDgSocket = new WSWebSocket(targetUrl, {
+      headers: {
+        "Authorization": `Token ${apiKey}`
+      }
+    });
+
+    currentDgSocket.on("open", () => {
+      console.log("[SERVER-WS-PROXY] Deepgram Conversational Voice Agent connection open & ready!");
+      // Flush buffered messages (e.g. initial Settings frame) sent by client before Deepgram handshake finished
+      while (pendingBuffer.length > 0) {
+        const item = pendingBuffer.shift();
+        if (item && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
+          if (item.isBinary) {
+            currentDgSocket.send(item.data);
+          } else {
+            currentDgSocket.send(item.data.toString());
+          }
         }
       }
-    }
-  });
+    });
 
-  currentDgSocket.on("message", (data, isBinary) => {
-    if (isClosed) return;
-    if (ws.readyState === ws.OPEN) {
-      if (isBinary) {
-        ws.send(data);
-      } else {
-        ws.send(data.toString());
+    currentDgSocket.on("message", (data, isBinary) => {
+      if (isClosed) return;
+      if (ws.readyState === ws.OPEN) {
+        if (isBinary) {
+          ws.send(data);
+        } else {
+          ws.send(data.toString());
+        }
       }
-    }
-  });
+    });
 
-  currentDgSocket.on("close", (code, reason) => {
-    const reasonStr = reason.toString() || `Close code ${code}`;
-    console.log(`[SERVER-WS-PROXY] Deepgram connection closed. Code: ${code}, Reason: ${reasonStr}`);
-    if (ws.readyState === ws.OPEN) {
-      try {
-        ws.send(JSON.stringify({
-          type: "Warning",
-          description: `Deepgram Voice Agent connection closed (Code ${code}: ${reasonStr})`,
-          code: code
-        }));
-      } catch (e) {}
-    }
-    cleanup(code, reasonStr);
-  });
-
-  currentDgSocket.on("error", (err: any) => {
-    console.error("[SERVER-WS-PROXY] Deepgram link error:", err.message || err);
-    if (ws.readyState === ws.OPEN) {
-      try {
-        ws.send(JSON.stringify({
-          type: "Error",
-          description: `Deepgram Voice Agent connection error: ${err.message || err}`,
-          code: "DEEPGRAM_AGENT_ERROR"
-        }));
-      } catch (e) {}
-    }
-    cleanup(1011, `Deepgram Voice Agent link error: ${err.message || err}`);
-  });
-
-  // Forward incoming audio and messages from Browser to active Deepgram Socket
-  ws.on("message", (data, isBinary) => {
-    if (isClosed || !currentDgSocket) return;
-    if (currentDgSocket.readyState === WSWebSocket.OPEN) {
-      if (isBinary) {
-        currentDgSocket.send(data);
-      } else {
-        currentDgSocket.send(data.toString());
+    currentDgSocket.on("close", (code, reason) => {
+      const reasonStr = reason.toString() || `Close code ${code}`;
+      console.log(`[SERVER-WS-PROXY] Deepgram connection closed. Code: ${code}, Reason: ${reasonStr}`);
+      if (ws.readyState === ws.OPEN) {
+        try {
+          ws.send(JSON.stringify({
+            type: "Warning",
+            description: `Deepgram Voice Agent connection closed (Code ${code}: ${reasonStr})`,
+            code: code
+          }));
+        } catch (e) {}
       }
-    } else if (currentDgSocket.readyState === WSWebSocket.CONNECTING) {
-      // Buffer messages until Deepgram connection handshake completes
-      pendingBuffer.push({ data, isBinary: Boolean(isBinary) });
+      cleanup(code, reasonStr);
+    });
+
+    currentDgSocket.on("error", (err: any) => {
+      console.error("[SERVER-WS-PROXY] Deepgram link error:", err.message || err);
+      if (ws.readyState === ws.OPEN) {
+        try {
+          ws.send(JSON.stringify({
+            type: "Error",
+            description: `Deepgram Voice Agent connection error: ${err.message || err}`,
+            code: "DEEPGRAM_AGENT_ERROR"
+          }));
+        } catch (e) {}
+      }
+      cleanup(1011, `Deepgram Voice Agent link error: ${err.message || err}`);
+    });
+
+    // Forward incoming audio and messages from Browser to active Deepgram Socket
+    ws.on("message", (data, isBinary) => {
+      if (isClosed || !currentDgSocket) return;
+      if (currentDgSocket.readyState === WSWebSocket.OPEN) {
+        if (isBinary) {
+          currentDgSocket.send(data);
+        } else {
+          currentDgSocket.send(data.toString());
+        }
+      } else if (currentDgSocket.readyState === WSWebSocket.CONNECTING) {
+        // Buffer messages until Deepgram connection handshake completes
+        pendingBuffer.push({ data, isBinary: Boolean(isBinary) });
+      }
+    });
+
+    ws.on("close", (code, reason) => {
+      cleanup(code, reason.toString());
+    });
+
+    ws.on("error", (err) => {
+      console.error("[SERVER-WS-PROXY] Browser WS connection error:", err);
+      cleanup(1011, "Browser socket error");
+    });
+  });
+}
+
+// ==========================================
+// Cloudflare Workers Native Hybrid Export
+// ==========================================
+let expressHandler: any = null;
+
+export default {
+  async fetch(request: any, env: any, ctx: any): Promise<Response> {
+    const url = new URL(request.url);
+
+    // 1. Intercept Deepgram WebSocket Upgrade request in Workers environment
+    if (url.pathname === "/api/deepgram/ws" && request.headers.get("Upgrade") === "websocket") {
+      let apiKey = url.searchParams.get("key");
+      let agentId = url.searchParams.get("agent_id");
+
+      if (!apiKey) {
+        apiKey = env.DEEPGRAM_API_KEY || env.DEEPGRAM_ADMIN_API_KEY || env.VITE_DEEPGRAM_API_KEY || env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+      }
+
+      if (!apiKey) {
+        return new Response("Deepgram API key is missing.", { status: 400 });
+      }
+
+      // Create native WebSocket pair
+      // @ts-ignore
+      const [clientWs, serverWs] = Object.values(new WebSocketPair()) as any[];
+      serverWs.accept();
+
+      // Establish outgoing WebSocket connection to Deepgram Voice Agent via fetch
+      const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
+      const dgRes = await fetch(targetUrl, {
+        headers: {
+          "Upgrade": "websocket",
+          "Authorization": `Token ${apiKey}`
+        }
+      });
+
+      // @ts-ignore
+      const dgSocket = dgRes.webSocket;
+      if (!dgSocket) {
+        return new Response("Failed to connect to Deepgram Voice Agent via Workers edge proxy.", { status: 502 });
+      }
+      dgSocket.accept();
+
+      // Keepalive timer for edge proxy
+      const keepAliveTimer = setInterval(() => {
+        try {
+          dgSocket.send(JSON.stringify({ type: "KeepAlive" }));
+        } catch (e) {}
+      }, 3000);
+
+      const cleanup = () => {
+        clearInterval(keepAliveTimer);
+        try { serverWs.close(); } catch (e) {}
+        try { dgSocket.close(); } catch (e) {}
+      };
+
+      // Pipe Browser -> Deepgram
+      serverWs.addEventListener("message", (event: any) => {
+        try {
+          dgSocket.send(event.data);
+        } catch (e) {}
+      });
+      serverWs.addEventListener("close", cleanup);
+      serverWs.addEventListener("error", cleanup);
+
+      // Pipe Deepgram -> Browser
+      dgSocket.addEventListener("message", (event: any) => {
+        try {
+          serverWs.send(event.data);
+        } catch (e) {}
+      });
+      dgSocket.addEventListener("close", cleanup);
+      dgSocket.addEventListener("error", cleanup);
+
+      return new Response(null, {
+        status: 101,
+        // @ts-ignore
+        webSocket: clientWs
+      });
     }
-  });
 
-  ws.on("close", (code, reason) => {
-    cleanup(code, reason.toString());
-  });
+    // 2. Initialize and route to Express app handler lazily
+    if (!expressHandler) {
+      // @ts-ignore
+      const { httpServerHandler } = await import("cloudflare:node");
+      expressHandler = httpServerHandler({ port: PORT });
+    }
 
-  ws.on("error", (err) => {
-    console.error("[SERVER-WS-PROXY] Browser WS connection error:", err);
-    cleanup(1011, "Browser socket error");
-  });
-});
+    return expressHandler.fetch(request, env, ctx);
+  }
+};

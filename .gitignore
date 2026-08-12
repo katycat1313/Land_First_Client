@@ -12,3 +12,6 @@ firebase-applet-config.json
 *.secret
 data/*.json
 !data/.gitkeep
+.wrangler/
+*.code-workspace
+*.sqlite
