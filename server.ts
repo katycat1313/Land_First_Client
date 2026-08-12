@@ -6570,21 +6570,24 @@ export default {
       const [clientWs, serverWs] = Object.values(new WebSocketPair()) as any[];
       serverWs.accept();
 
-      // Establish outgoing WebSocket connection to Deepgram Voice Agent via fetch
-      const targetUrl = "https://agent.deepgram.com/v1/agent/converse";
-      const dgRes = await fetch(targetUrl, {
-        headers: {
-          "Upgrade": "websocket",
-          "Authorization": `Token ${apiKey}`
-        }
-      });
+      // Establish native outgoing WebSocket connection to Deepgram Voice Agent
+      let dgUrl = "wss://agent.deepgram.com/v1/agent/converse";
+      const params = new URLSearchParams();
+      if (agentId) params.set("agent_id", agentId);
+      const encoding = url.searchParams.get("encoding");
+      if (encoding) params.set("encoding", encoding);
+      const sampleRate = url.searchParams.get("sample_rate");
+      if (sampleRate) params.set("sample_rate", sampleRate);
+      const channels = url.searchParams.get("channels");
+      if (channels) params.set("channels", channels);
+
+      const queryString = params.toString();
+      if (queryString) {
+        dgUrl += "?" + queryString;
+      }
 
       // @ts-ignore
-      const dgSocket = dgRes.webSocket;
-      if (!dgSocket) {
-        return new Response("Failed to connect to Deepgram Voice Agent via Workers edge proxy.", { status: 502 });
-      }
-      dgSocket.accept();
+      const dgSocket = new WebSocket(dgUrl, ["token", apiKey]);
 
       // Keepalive timer for edge proxy
       const keepAliveTimer = setInterval(() => {
