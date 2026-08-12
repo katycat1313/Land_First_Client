@@ -88,14 +88,14 @@ const apiCache = new SimpleCache(300);
 function safeParseJSON(text: string): any {
   if (!text) return null;
   let cleaned = text.trim();
-  
+
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\n/i, "");
     cleaned = cleaned.replace(/\n```$/, "");
   }
-  
+
   cleaned = cleaned.trim();
-  
+
   try {
     return JSON.parse(cleaned);
   } catch (err: any) {
@@ -346,7 +346,7 @@ function safeReadFile(filePath: string, defaultValue: string = ""): string {
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath, "utf-8");
     }
-  } catch (e) {}
+  } catch (e) { }
   return memoryDBCache[filePath] || defaultValue;
 }
 
@@ -415,7 +415,7 @@ async function syncToSupabase(filePath: string, content: string) {
           if (error) console.error("[Supabase Sync Error] Opportunities:", error);
         }
       }
-    } 
+    }
     // 2. Bot Config file
     else if (filePath === BOT_CONFIG_FILE) {
       const dbConfig = {
@@ -430,7 +430,7 @@ async function syncToSupabase(filePath: string, content: string) {
 
       const { error } = await supabase.from("bot_config").upsert(dbConfig, { onConflict: "id" });
       if (error) console.error("[Supabase Sync Error] Bot Config:", error);
-    } 
+    }
     // 3. Alerts file
     else if (filePath === ALERTS_FILE) {
       if (Array.isArray(data)) {
@@ -450,7 +450,7 @@ async function syncToSupabase(filePath: string, content: string) {
           if (error) console.error("[Supabase Sync Error] Alerts:", error);
         }
       }
-    } 
+    }
     // 4. Agent Memory file
     else if (filePath === AGENT_MEMORY_FILE) {
       // Upsert memory entries
@@ -580,7 +580,7 @@ async function syncSupabaseOnStartup() {
     // 4. Fetch Agent Memory & Tasks
     const { data: dbEntries, error: entriesErr } = await supabase.from("agent_memory_entries").select("*").order("timestamp", { ascending: false });
     const { data: dbTasks, error: tasksErr } = await supabase.from("offline_tasks").select("*").order("timestamp", { ascending: false });
-    
+
     if (!entriesErr && !tasksErr) {
       const memory = {
         summary: "Previous session context active in database.",
@@ -627,7 +627,7 @@ const seedOpportunities: any[] = [];
 const getFallbackSolutionOptions = (opp: any): any[] => {
   const isHighPain = opp.painLevel === "High";
   const baseScore = opp.opportunityScore || 80;
-  
+
   return [
     {
       id: `${opp.id}-opt-1`,
@@ -729,7 +729,7 @@ const loadOpportunities = (): any[] => {
       return updated;
     });
   }
-  
+
   // Enrich seed opportunities before saving
   const enrichedSeeds = seedOpportunities.map(opp => ({
     ...opp,
@@ -763,7 +763,7 @@ app.get("/api/stats", (req, res) => {
   const contacted = opps.filter(o => o.status === "Contacted").length;
   const inDiscussion = opps.filter(o => o.status === "In Discussion").length;
   const productIdeas = opps.filter(o => o.status === "Potential Product").length;
-  
+
   // Filter for follow-ups that are active and have a follow-up date
   const nowStr = new Date().toISOString().split('T')[0];
   const followupsPending = opps.filter(o => o.followUpDate && o.followUpDate <= nowStr && o.status !== "Archived").length;
@@ -948,7 +948,7 @@ app.post("/api/llm/status", async (req, res) => {
           availableModels = tagsData.models.map((m: any) => m.name || m.model);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
     const hasTargetModel = availableModels.some(m => m.toLowerCase().includes(targetModel.toLowerCase()));
 
@@ -1092,7 +1092,7 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
 
     const text = response.text || "{}";
     const parsedData = safeParseJSON(text);
-    
+
     // Supplement metadata
     const rawOpp = {
       id: "opp-" + Date.now(),
@@ -1451,8 +1451,8 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
     // Use broader boolean keywords to ensure we match a wider selection of posts
     const queries = semanticQueries && semanticQueries.length > 0
       ? semanticQueries
-      : (keyword 
-        ? [keyword] 
+      : (keyword
+        ? [keyword]
         : ["manual", "tedious", "spreadsheet", "workflow", "anyone else", "is there a way", "need help"]);
 
     // Search up to 3 subreddits in the sector list instead of just subs[0]
@@ -1468,7 +1468,7 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
         await delayMs(800);
         const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&limit=8`;
         console.log(`Crawling Reddit r/${sub} for query: "${q}"...`);
-        
+
         let response = await fetch(url, { headers });
 
         if (!response.ok) {
@@ -1506,10 +1506,10 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
     // Fallback global Reddit search if we got very few posts and are in default discovery mode
     if (allHits.length < 3) {
       console.log(`Too few results for sector ${sector} in targeted subreddits. Running global Reddit fallback search...`);
-      const globalQuery = keyword 
-        ? keyword 
+      const globalQuery = keyword
+        ? keyword
         : `${sector.split(' ')[0]} manual spreadsheet`;
-      
+
       await delayMs(800);
       const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(globalQuery)}&sort=relevance&limit=15`;
       const response = await fetch(url, { headers });
@@ -1573,7 +1573,7 @@ async function scrapeDiscourse(domain: string, keyword: string, sector: string, 
         const data: any = await response.json();
         const posts = data?.posts || [];
         const topics = data?.topics || [];
-        
+
         const topicMap = new Map();
         for (const t of topics) {
           topicMap.set(t.id, t);
@@ -1585,7 +1585,7 @@ async function scrapeDiscourse(domain: string, keyword: string, sector: string, 
             const topic = topicMap.get(post.topic_id) || {};
             const slug = topic.slug || "topic";
             const topicTitle = topic.title || "Discussion on Discourse";
-            
+
             results.push({
               id: `discourse-${cleanDomain}-${post.id}`,
               author: post.username || "Discourse_User",
@@ -1695,7 +1695,7 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
 
     const xml = await response.text();
     const items: any[] = [];
-    
+
     // 1. Try RSS 2.0 format (<item>...</item>)
     const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
     let match;
@@ -1718,7 +1718,7 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
       while ((match = entryRegex.exec(xml)) !== null) {
         const entryXml = match[1];
         const title = extractXmlField(entryXml, "title");
-        
+
         let link = extractXmlField(entryXml, "link");
         if (!link || !link.startsWith("http")) {
           const hrefMatch = /<link[^>]+href=["']([^"']+)["']/i.exec(entryXml);
@@ -1726,9 +1726,9 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
             link = hrefMatch[1];
           }
         }
-        
+
         const content = extractXmlField(entryXml, "content") || extractXmlField(entryXml, "summary");
-        
+
         let author = "Atom_User";
         const authorMatch = /<author>([\s\S]*?)<\/author>/i.exec(entryXml);
         if (authorMatch) {
@@ -1816,7 +1816,7 @@ async function scrapeGitHubIssues(keyword: string, sector: string, semanticQueri
       // Search open issues containing the terms
       const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}+is:issue+state:open&per_page=6`;
       console.log(`Crawling GitHub issues for query: "${q}"...`);
-      
+
       const response = await fetch(url, {
         headers: {
           "User-Agent": "OpportunityRadar/1.1 (contact: katycat1313@gmail.com)",
@@ -1875,7 +1875,7 @@ async function scrapeMastodonStatuses(keyword: string, sector: string): Promise<
     };
     const tags = sectorTags[sector] || ["workflow", "spreadsheet", "smallbusiness"];
     const allHits: any[] = [];
-    
+
     // Pick the first 3 tags
     for (const tag of tags.slice(0, 3)) {
       const url = `https://mastodon.social/api/v1/timelines/tag/${tag}?limit=10`;
@@ -1937,7 +1937,7 @@ async function scrapeStackExchange(keyword: string, sector: string, semanticQuer
       ? semanticQueries
       : ["spreadsheet manual workaround", "excel tedious export"];
     const allHits: any[] = [];
-    
+
     for (const q of queries.slice(0, 5)) {
       const url = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(q)}&site=stackoverflow&pagesize=5`;
       console.log(`Crawling Stack Exchange questions for query: "${q}"...`);
@@ -1983,16 +1983,16 @@ async function scrapeDiscordMessages(botToken: string, channelId: string): Promi
   try {
     const url = `https://discord.com/api/v10/channels/${channelId}/messages?limit=25`;
     console.log(`Crawling Discord channel messages for Channel ID: ${channelId}...`);
-    
+
     const cleanToken = botToken.startsWith("Bot ") ? botToken : `Bot ${botToken}`;
-    
+
     const response = await fetch(url, {
       headers: {
         "Authorization": cleanToken,
         "User-Agent": "OpportunityRadar/1.2 (contact: katycat1313@gmail.com)"
       }
     });
-    
+
     if (response.ok) {
       const messages: any = await response.json();
       if (Array.isArray(messages)) {
@@ -2037,7 +2037,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
   const targetSector = sector || "All";
   const mode = discoveryMode || "semantic";
   const isLiteral = mode === "literal";
-  
+
   const trace: string[] = [];
   const logTrace = (msg: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -2061,7 +2061,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
       });
     }
   }
-  
+
   try {
     // Check for API Key first before running any queries
     const apiKey = process.env.GEMINI_API_KEY;
@@ -2249,7 +2249,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
             "Niche Hobby Forums / Communities": ["Online-Communities", "Forum-Software"]
           };
           const topics = sectorQuoraTopics[targetSector] || ["Small-Businesses", "Operations-Management", "Business-Automation"];
-          
+
           for (const topic of topics) {
             logTrace(`[Quora] Fetching live sector-specific topic feed: "${topic.replace(/-/g, ' ')}"...`);
             const cleanTopic = topic.replace(/-/g, ' ');
@@ -2266,11 +2266,11 @@ app.post("/api/opportunities/discover", async (req, res) => {
 
     // Combine sources
     let scrapedComments = [
-      ...scrapedHN, 
-      ...scrapedReddit, 
-      ...scrapedGitHub, 
-      ...scrapedMastodon, 
-      ...scrapedSE, 
+      ...scrapedHN,
+      ...scrapedReddit,
+      ...scrapedGitHub,
+      ...scrapedMastodon,
+      ...scrapedSE,
       ...scrapedDiscord,
       ...scrapedDiscourse,
       ...scrapedRSS,
@@ -2288,7 +2288,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
       const fallbackGitHub = isEnabled("github") ? await scrapeGitHubIssues("", targetSector, fallbackSemanticQueries) : [];
       const fallbackMastodon = isEnabled("mastodon") ? await scrapeMastodonStatuses("", targetSector) : [];
       const fallbackSE = isEnabled("stackexchange") ? await scrapeStackExchange("", targetSector, fallbackSemanticQueries) : [];
-      
+
       const fallbackDiscourse = isEnabled("discourse") ? await (async () => {
         const results: any[] = [];
         const discoursePlat = config.platforms.find((p: any) => p.platformId === "discourse");
@@ -2342,11 +2342,11 @@ app.post("/api/opportunities/discover", async (req, res) => {
       })() : [];
 
       scrapedComments = [
-        ...fallbackHN, 
-        ...fallbackReddit, 
-        ...fallbackGitHub, 
-        ...fallbackMastodon, 
-        ...fallbackSE, 
+        ...fallbackHN,
+        ...fallbackReddit,
+        ...fallbackGitHub,
+        ...fallbackMastodon,
+        ...fallbackSE,
         ...scrapedDiscord,
         ...fallbackDiscourse,
         ...fallbackRSS,
@@ -2492,12 +2492,12 @@ app.post("/api/opportunities/discover", async (req, res) => {
       logTrace(`❌ JSON PARSE FAILURE: ${parseErr.message || parseErr}. Raw response preview: "${text.substring(0, 200)}..."`);
       throw new Error(`AI generated invalid JSON structure: ${parseErr.message}`);
     }
-    
+
     // Assign IDs and merge into existing database
     const rawOpps = parsedOpps.map((opp: any, index: number) => {
       const isReal = opp.sourceUrl && opp.sourceUrl.startsWith("http");
       const idPrefix = isReal ? "real-lead" : "discovered";
-      
+
       // Find matching crawled post to preserve its original unedited full post text
       const matchedComment = scrapedComments.find((c: any) => c.sourceUrl === opp.sourceUrl);
       const fullPostText = matchedComment ? matchedComment.text : (opp.evidence || opp.problemSummary);
@@ -2546,10 +2546,10 @@ app.post("/api/opportunities/discover", async (req, res) => {
     });
   } catch (error: any) {
     logTrace(`❌ CRITICAL EXCEPTION: ${error.message || error}`);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       error: error.message || "AI Opportunity Discovery failed.",
-      trace 
+      trace
     });
   }
 });
@@ -2563,14 +2563,14 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
 
   const firecrawlKey = process.env.FIRECRAWL_API_KEY;
   if (!firecrawlKey) {
-    return res.status(400).json({ 
-      error: "FIRECRAWL_API_KEY is not configured in Settings > Secrets. Please add your Firecrawl key first." 
+    return res.status(400).json({
+      error: "FIRECRAWL_API_KEY is not configured in Settings > Secrets. Please add your Firecrawl key first."
     });
   }
 
   try {
     console.log(`Scraping web page via Firecrawl (Stealth Mode: ${!!stealthMode}): ${url}`);
-    
+
     // Rotate standard headers and add anti-fingerprinting configurations if stealthMode is active
     const requestBody: any = {
       url: url,
@@ -2663,7 +2663,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
 
     const text = response.text || "{}";
     const parsedData = safeParseJSON(text);
-    
+
     const rawOpp = {
       id: "opp-" + Date.now(),
       timestamp: new Date().toISOString(),
@@ -2841,7 +2841,7 @@ const loadBotConfig = () => {
         config.platforms.push(defaultPlat);
       }
     }
-    
+
     saveBotConfig(config);
     return config;
   }
@@ -2963,7 +2963,7 @@ app.post("/api/agent/memory/distill", async (req, res) => {
     const memory = loadAgentMemory();
     const logs = loadComputerLogs();
 
-    const contactedOrReplied = opps.filter(o => 
+    const contactedOrReplied = opps.filter(o =>
       o.status === "Contacted" || o.status === "Replied" || o.status === "In Discussion" || o.status === "Potential Product"
     );
 
@@ -2971,15 +2971,15 @@ app.post("/api/agent/memory/distill", async (req, res) => {
 
 ACTIVE OPPORTUNITIES (${opps.length} total, ${contactedOrReplied.length} in outreach pipeline):
 ${JSON.stringify(contactedOrReplied.slice(0, 15).map(o => ({
-  title: o.title,
-  author: o.author,
-  industry: o.industry,
-  platform: o.sourcePlatform,
-  status: o.status,
-  notes: o.notes,
-  lastInteraction: o.lastInteraction,
-  problemSummary: o.problemSummary
-})), null, 2)}
+      title: o.title,
+      author: o.author,
+      industry: o.industry,
+      platform: o.sourcePlatform,
+      status: o.status,
+      notes: o.notes,
+      lastInteraction: o.lastInteraction,
+      problemSummary: o.problemSummary
+    })), null, 2)}
 
 RECENT COMPUTER & INBOUND LOGS:
 ${JSON.stringify(logs.slice(-10), null, 2)}
@@ -3094,7 +3094,7 @@ app.get("/api/crm/sync-sheet", (req, res) => {
   try {
     const opps = loadOpportunities();
     const logs = loadComputerLogs();
-    
+
     // Find inbound replies in computer logs
     const inboundReplies = logs.filter(l => l.includes("INBOUND REPLY RECEIVED"));
 
@@ -3319,7 +3319,7 @@ Return JSON:
   "recentEvents": "Industry digital transformation push",
   "newsSignals": ["Growing demand for rapid client response times"],
   "employeePainPoints": ["Overwhelmed staff spending hours manually processing entries"],
-  "icebreakers": ["Hi ${opp.author}, noticed your discussion about ${opp.problemSummary.slice(0,30)}..."],
+  "icebreakers": ["Hi ${opp.author}, noticed your discussion about ${opp.problemSummary.slice(0, 30)}..."],
   "suggestedDealValue": 3000
 }`;
 
@@ -3421,7 +3421,7 @@ app.post("/api/computer/logs", (req, res) => {
 app.post("/api/inbound-reply", (req, res) => {
   try {
     const bodyObj = req.body || {};
-    
+
     // Helper to safely extract string from string or object fields
     const extractString = (val: any): string => {
       if (!val) return "";
@@ -3446,7 +3446,7 @@ app.post("/api/inbound-reply", (req, res) => {
 
     const timestamp = new Date().toISOString();
     const logEntry = `[${timestamp}] 💬 INBOUND REPLY RECEIVED [${platform}] from ${replyFrom} (${replySubject}): "${replyText.substring(0, 300)}${replyText.length > 300 ? '...' : ''}"`;
-    
+
     // 1. Save to computer logs so dashboard & PAC see it
     const currentLogs = loadComputerLogs();
     currentLogs.unshift(logEntry);
@@ -3626,7 +3626,7 @@ async function sendDualEmailWithFallback(params: {
 }) {
   const { to, subject, bodyText, opportunityId, platform = "Email", actionType = "outreach", req } = params;
   const baseUrl = getPublishedBaseUrl(req);
-  
+
   // Construct 1-Click action link pointing strictly to the published production app URL
   const encodedTo = encodeURIComponent(to);
   const encodedSubject = encodeURIComponent(subject);
@@ -3664,7 +3664,7 @@ async function sendDualEmailWithFallback(params: {
     fallbackActivated = true;
     methodUsed = "n8n Webhook";
     const n8nWebhookUrl = process.env.N8N_EMAIL_WEBHOOK_URL || "https://your-n8n-tunnel.trycloudflare.com/webhook/send-email";
-    
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
@@ -3725,7 +3725,7 @@ app.all("/api/one-click/execute", async (req, res) => {
   try {
     const query = req.query || {};
     const body = req.body || {};
-    
+
     const action = String(query.action || body.action || "outreach");
     const id = String(query.id || body.id || "");
     const to = String(query.to || body.to || "");
@@ -3889,7 +3889,7 @@ app.post("/api/stripe/create-payment-link", async (req, res) => {
       // Return a clean payment link structure ready for when STRIPE_SECRET_KEY is configured
       const appUrl = process.env.APP_URL || "https://problems-solutions.ai.studio";
       const simulatedUrl = `https://checkout.stripe.com/pay/deposit?amount=${numericAmount}&client=${encodeURIComponent(clientName || "Client")}&title=${encodeURIComponent(title || "50% Upfront Deposit")}`;
-      
+
       return res.json({
         success: true,
         paymentUrl: simulatedUrl,
@@ -3937,22 +3937,22 @@ app.delete("/api/alerts", (req, res) => {
 async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foundOpps: any[] }> {
   const logs: string[] = [];
   const foundOpps: any[] = [];
-  
+
   logs.push(`[${new Date().toISOString()}] 🚀 Initiating Active Bot Fleet Scan Cycle...`);
-  
+
   try {
     for (const plat of config.platforms) {
       if (!plat.isEnabled) {
         logs.push(`[${plat.platformName}] 🚫 Platform integration disabled. Skipping.`);
         continue;
       }
-      
+
       logs.push(`[${plat.platformName}] 🔍 Initializing ${plat.platformName} Bot. Strategy: ${plat.strategy.toUpperCase()}. Polling Interval: ${plat.scanFrequencyMinutes}m`);
-      
+
       if (plat.platformId === "discord") {
         const activeTargets = plat.targets.filter((t: any) => t.isEnabled);
         logs.push(`[${plat.platformName}] 📡 Initiating scan of active Discord target channels: ${activeTargets.map((t: any) => t.name).join(", ")}...`);
-        
+
         if (!plat.botToken) {
           logs.push(`[${plat.platformName}] 💡 Discord Bot Token is missing. Configure it in settings to fetch live channel messages.`);
           logs.push(`[${plat.platformName}] ℹ️ Skipping live Discord fetch due to missing API credentials.`);
@@ -3970,7 +3970,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               logs.push(`[${plat.platformName}] ⚠️ Discord crawl for "${target.name}" failed: ${e}`);
             }
           }
-          
+
           if (scrapedMsgs.length > 0) {
             logs.push(`[${plat.platformName}] 🧠 Found ${scrapedMsgs.length} messages. Filtering with Gemini...`);
             try {
@@ -4014,7 +4014,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                   "valueAdditionIdeas": ["Idea 1"]
                 }]
               `;
-              
+
               const response = await ai.models.generateContent({
                 model: "gemini-3.6-flash",
                 contents: prompt,
@@ -4022,11 +4022,11 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                   responseMimeType: "application/json"
                 }
               });
-              
+
               const text = response.text || "[]";
               const cleanText = text.replace(/```json/gi, "").replace(/```/g, "").trim();
               const parsed = JSON.parse(cleanText);
-              
+
               if (Array.isArray(parsed) && parsed.length > 0) {
                 for (const opp of parsed) {
                   opp.id = `discovered-discord-${Date.now()}`;
@@ -4048,11 +4048,11 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           }
         }
       }
-      
+
       else if (plat.platformId === "reddit") {
         const activeTargets = plat.targets.filter((t: any) => t.isEnabled);
         logs.push(`[${plat.platformName}] 🎯 Running live targeted scans on active subreddits: ${activeTargets.map((t: any) => t.name).join(", ")}...`);
-        
+
         let scrapedComments: any[] = [];
         for (const target of activeTargets) {
           logs.push(`[${plat.platformName}] 🕸️ Crawling live JSON feed for r/${target.urlOrPath}...`);
@@ -4063,7 +4063,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
             logs.push(`[${plat.platformName}] ⚠️ Direct crawl of r/${target.urlOrPath} faced a transient rate limit or parsed empty.`);
           }
         }
-        
+
         if (scrapedComments.length > 0) {
           logs.push(`[${plat.platformName}] 🧠 Found ${scrapedComments.length} raw candidates. Filtering high-pain signals using Gemini...`);
           try {
@@ -4137,7 +4137,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           logs.push(`[${plat.platformName}] ℹ️ No new active discussions found matching targeted keywords.`);
         }
       }
-      
+
       else if (plat.platformId === "hn") {
         logs.push(`[${plat.platformName}] 📡 Scanning Hacker News comments for organic pain phrases...`);
         try {
@@ -4218,7 +4218,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           logs.push(`[${plat.platformName}] ⚠️ Hacker News live scan faced a transient connection delay.`);
         }
       }
-      
+
       else if (plat.platformId === "github") {
         logs.push(`[${plat.platformName}] 📡 Scanning GitHub Issues for workflow bottlenecks and manual tasks...`);
         try {
@@ -4299,25 +4299,25 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           logs.push(`[${plat.platformName}] ⚠️ GitHub live scan faced a transient connection delay.`);
         }
       }
-      
+
       else if (plat.platformId === "firecrawl") {
         logs.push(`[${plat.platformName}] 🕷️ Custom web crawler launching in background...`);
         logs.push(`[${plat.platformName}] 🕸️ Crawling configured forums...`);
         logs.push(`[${plat.platformName}] ℹ️ No active new comments extracted.`);
       }
-      
+
       else if (plat.platformId === "facebook") {
         logs.push(`[${plat.platformName}] 🔒 Facebook Groups are private walled gardens.`);
         logs.push(`[${plat.platformName}] ⚠️ Direct unauthenticated scraping is restricted by Meta's anti-bot protections.`);
         logs.push(`[${plat.platformName}] 💡 To scan safely without account risks, copy and paste raw posts into the custom text analyzer or use 'Direct Scrape' on public group links.`);
       }
-      
+
       else if (plat.platformId === "linkedin") {
         logs.push(`[${plat.platformName}] 🔒 LinkedIn has aggressive anti-scraping controls & IP firewalls.`);
         logs.push(`[${plat.platformName}] ⚠️ Headless browser crawling requires active authenticated cookies, which can lead to account bans.`);
         logs.push(`[${plat.platformName}] 💡 Recommended approach: Use our 'Direct Scrape' tool with your Firecrawl API key on specific public post URLs, or copy-paste text.`);
       }
-      
+
       else if (plat.platformId === "mastodon") {
         logs.push(`[${plat.platformName}] 📡 Querying federated Mastodon nodes for customer complaints...`);
         try {
@@ -4479,7 +4479,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
       else if (plat.platformId === "discourse") {
         const activeTargets = plat.targets.filter((t: any) => t.isEnabled);
         logs.push(`[${plat.platformName}] 🎯 Running live targeted scans on active Discourse forums: ${activeTargets.map((t: any) => t.name).join(", ")}...`);
-        
+
         let scrapedComments: any[] = [];
         for (const target of activeTargets) {
           logs.push(`[${plat.platformName}] 🕸️ Scanning Discourse forum: ${target.name} (${target.urlOrPath})...`);
@@ -4490,7 +4490,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
             logs.push(`[${plat.platformName}] ⚠️ Direct crawl of ${target.name} faced a transient rate limit or parsed empty.`);
           }
         }
-        
+
         if (scrapedComments.length > 0) {
           logs.push(`[${plat.platformName}] 🧠 Found ${scrapedComments.length} raw candidates. Filtering high-pain signals using Gemini...`);
           try {
@@ -4566,7 +4566,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
       else if (plat.platformId === "rss") {
         const activeTargets = plat.targets.filter((t: any) => t.isEnabled);
         logs.push(`[${plat.platformName}] 🎯 Scanning active public RSS feeds: ${activeTargets.map((t: any) => t.name).join(", ")}...`);
-        
+
         let scrapedComments: any[] = [];
         for (const target of activeTargets) {
           logs.push(`[${plat.platformName}] 🕸️ Fetching feed: ${target.name} (${target.urlOrPath})...`);
@@ -4577,7 +4577,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
             logs.push(`[${plat.platformName}] ⚠️ Direct crawl of RSS feed ${target.name} failed or timed out.`);
           }
         }
-        
+
         if (scrapedComments.length > 0) {
           logs.push(`[${plat.platformName}] 🧠 Found ${scrapedComments.length} raw feed items. Filtering high-pain business problems using Gemini...`);
           try {
@@ -4653,7 +4653,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
       else if (plat.platformId === "quora") {
         const activeTargets = plat.targets.filter((t: any) => t.isEnabled);
         logs.push(`[${plat.platformName}] 🎯 Querying Quora Topic feeds for customer complaints: ${activeTargets.map((t: any) => t.name).join(", ")}...`);
-        
+
         let scrapedComments: any[] = [];
         for (const target of activeTargets) {
           logs.push(`[${plat.platformName}] 🕸️ Scanning Quora Topic RSS: ${target.name} (Topic ID: ${target.urlOrPath})...`);
@@ -4668,7 +4668,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
             logs.push(`[${plat.platformName}] ⚠️ Direct crawl of Quora topic feed ${target.name} failed or timed out.`);
           }
         }
-        
+
         if (scrapedComments.length > 0) {
           logs.push(`[${plat.platformName}] 🧠 Found ${scrapedComments.length} raw Quora candidates. Filtering high-pain complaints using Gemini...`);
           try {
@@ -4770,14 +4770,14 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
     if (config.emailAlertsEnabled) {
       const alertRecipient = config.alertRecipientEmail || process.env.ALERT_RECIPIENT_EMAIL || "upscaleyourbusiness.wv@gmail.com";
       const minScore = config.minAlertScore || 75;
-      
+
       const alertsToTrigger = enrichedOpps.filter(o => (o.opportunityScore || 0) >= minScore);
       if (alertsToTrigger.length > 0) {
         logs.push(`[Email Alerts] 📧 Triggering email notification alerts for ${alertsToTrigger.length} high-potential opportunities...`);
         try {
           let existingAlerts = [];
-      existingAlerts = JSON.parse(safeReadFile(ALERTS_FILE, "[]"));
-          
+          existingAlerts = JSON.parse(safeReadFile(ALERTS_FILE, "[]"));
+
           for (const opp of alertsToTrigger) {
             const emailSubject = `🚨 New [${opp.industry || "Business Pain"}] Opportunity Discovered (Score: ${opp.opportunityScore}/100)`;
             const emailBody = `=========================================
@@ -4816,7 +4816,7 @@ ${opp.responseDraft}
 
 -----------------------------------------
 =========================================`;
-            
+
             existingAlerts.unshift({
               id: `alert-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
               timestamp: new Date().toISOString(),
@@ -4827,7 +4827,7 @@ ${opp.responseDraft}
               oppTitle: opp.title,
               oppScore: opp.opportunityScore
             });
-            
+
             const emailResult = await sendMailgunEmail({
               to: alertRecipient,
               subject: emailSubject,
@@ -4848,7 +4848,7 @@ ${opp.responseDraft}
             const encodedSubject = encodeURIComponent(`Outreach response for: ${opp.title}`);
             const actionUrl = `${baseUrl}/api/one-click/execute?action=outreach&id=${opp.id || opp.author}&to=${encodedTo}&platform=${encodeURIComponent(opp.sourcePlatform || "Social")}&subject=${encodedSubject}`;
 
-            const telegramMessage = 
+            const telegramMessage =
               `🚨 <b>New Opportunity Discovered (Score: ${opp.opportunityScore}/100)</b>\n\n` +
               `📌 <b>Title</b>: ${opp.title}\n` +
               `📡 <b>Platform</b>: ${opp.sourcePlatform}\n` +
@@ -4864,7 +4864,7 @@ ${opp.responseDraft}
               logs.push(`[Telegram Alerts] ⚠️ Telegram alert skipped/failed: ${tgResult.error || "no credentials"}`);
             }
           }
-          
+
           safeWriteFile(ALERTS_FILE, JSON.stringify(existingAlerts.slice(0, 50), null, 2));
         } catch (alertErr) {
           console.error("Error generating alerts:", alertErr);
@@ -5003,7 +5003,7 @@ async function executeOfflineTasks() {
           const encodedSubject = encodeURIComponent(`Outreach response for: ${newOpp.title}`);
           const actionUrl = `${PUBLISHED_APP_URL}/api/one-click/execute?action=outreach&id=${newOpp.id}&to=${encodedTo}&platform=Email&subject=${encodedSubject}`;
 
-          const telegramMessage = 
+          const telegramMessage =
             `🧠 <b>P.A.C. Offline Task Completed</b>\n\n` +
             `📝 <b>Draft Prepared</b>: "${doc.title}"\n` +
             `📋 <b>Task</b>: ${task.task}\n\n` +
@@ -5177,12 +5177,12 @@ The 4 frameworks we are testing are:
 
 Analyze these leads:
 ${JSON.stringify(sample.map(o => ({
-  title: o.title,
-  industry: o.industry,
-  problemSummary: o.problemSummary,
-  evidence: o.evidence,
-  mvpIdea: o.mvpIdea
-})))}
+      title: o.title,
+      industry: o.industry,
+      problemSummary: o.problemSummary,
+      evidence: o.evidence,
+      mvpIdea: o.mvpIdea
+    })))}
 
 Tasks:
 Simulate how these decision-makers would respond to each of the 4 frameworks based on real-world sales psychology, defense mechanisms, and operational pain.
@@ -5236,7 +5236,7 @@ Return raw JSON matching this structure exactly (do not wrap in markdown unless 
 // ==========================================
 app.post("/api/learning/optimize", async (req, res) => {
   const { opportunities } = req.body;
-  
+
   try {
     const ai = getGeminiClient();
     const model = "gemini-3.6-flash";
@@ -5261,9 +5261,9 @@ Your task is to analyze actual user interaction data, identify high-converting s
 
 Current Crawler / Bot Configurations:
 ${JSON.stringify(botConfig.platforms.map((p: any) => ({
-  platformName: p.platformName,
-  targets: p.targets.map((t: any) => ({ name: t.name, keywordOrSub: t.urlOrPath, isEnabled: t.isEnabled }))
-})))}
+      platformName: p.platformName,
+      targets: p.targets.map((t: any) => ({ name: t.name, keywordOrSub: t.urlOrPath, isEnabled: t.isEnabled }))
+    })))}
 
 Actual CRM Interactions & Performance Data:
 - Total opportunities tracked: ${list.length}
@@ -5315,7 +5315,7 @@ Return raw JSON matching this structure exactly:
     // This is true self-learning and automatic improvement in action.
     if (parsed && Array.isArray(parsed.suggestedNewTargets)) {
       let configChanged = false;
-      
+
       for (const newTarget of parsed.suggestedNewTargets) {
         const platform = botConfig.platforms.find((p: any) => p.platformId === newTarget.platformId);
         if (platform) {
@@ -5651,10 +5651,10 @@ ${JSON.stringify(computerLogs || [], null, 2)}
 app.post(["/api/agent/chat", "/api/generate-reply"], async (req, res) => {
   try {
     const { prompt, message, text, incomingEmail, prospectContext, sheetData, context, snippet, body } = req.body || {};
-    
+
     // Helper to safely convert object/string to string text
     const stringifyVal = (v: any) => typeof v === 'object' ? JSON.stringify(v) : String(v || '');
-    
+
     const query = [
       prompt,
       message,
@@ -5762,7 +5762,7 @@ async function getOrFetchDeepgramAgentId(apiKey: string): Promise<string> {
             }
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
   } catch (err) {
     console.error("[SERVER-DEEPGRAM] Error while scanning existing Agent ID:", err);
@@ -5846,7 +5846,7 @@ app.get("/api/deepgram/list-agents", async (req, res) => {
             });
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     return res.json({
@@ -5955,57 +5955,99 @@ app.get("/api/deepgram/diagnose", async (req, res) => {
 
     // 3. Test outbound WebSocket connection server-side to agent.deepgram.com
     report.step3_wsTest.attempted = true;
-    const testUrlsToTry = [
-      `wss://agent.deepgram.com/v1/agent/converse`
-    ];
+    const testWsUrl = `wss://agent.deepgram.com/v1/agent/converse`;
 
     let wsSuccess = false;
     let lastError = "";
     let lastCode = 0;
     let lastReason = "";
 
-    for (const testWsUrl of testUrlsToTry) {
-      await new Promise<void>((resolve) => {
-        const testSocket = new WSWebSocket(testWsUrl, {
-          headers: { "Authorization": `Token ${apiKey}` },
-          handshakeTimeout: 4000
-        });
+    await new Promise<void>((resolve) => {
+      let timeout: any;
+      const finish = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
 
-        let timeout = setTimeout(() => {
-          lastError = `Handshake timeout on ${testWsUrl}`;
-          try { testSocket.close(); } catch {}
-          resolve();
-        }, 4000);
+      try {
+        if (isWorker) {
+          // Cloudflare Workers runtime: the `ws` npm package needs Node's net/tls sockets,
+          // which Workers doesn't provide — use the native global WebSocket instead
+          // (same pattern the production proxy uses), authenticating via subprotocol.
+          // @ts-ignore
+          const testSocket: any = new WebSocket(testWsUrl, ["token", apiKey]);
 
-        testSocket.on("open", () => {
-          clearTimeout(timeout);
-          wsSuccess = true;
-          report.step3_wsTest.success = true;
-          report.step3_wsTest.logs = (report.step3_wsTest.logs || []).concat(`Successfully connected to ${testWsUrl}`);
-          try { testSocket.close(1000, "Diagnostic test complete"); } catch {}
-          resolve();
-        });
+          timeout = setTimeout(() => {
+            lastError = `Handshake timeout on ${testWsUrl}`;
+            try { testSocket.close(); } catch { }
+            finish();
+          }, 4000);
 
-        testSocket.on("close", (code, reason) => {
-          clearTimeout(timeout);
-          if (!wsSuccess) {
-            lastCode = code;
-            lastReason = reason.toString() || `Code ${code}`;
-            (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} closed (Code ${code}: ${lastReason})`);
-          }
-          resolve();
-        });
+          testSocket.addEventListener("open", () => {
+            wsSuccess = true;
+            report.step3_wsTest.success = true;
+            report.step3_wsTest.logs = (report.step3_wsTest.logs || []).concat(`Successfully connected to ${testWsUrl}`);
+            try { testSocket.close(1000, "Diagnostic test complete"); } catch { }
+            finish();
+          });
 
-        testSocket.on("error", (err) => {
-          clearTimeout(timeout);
-          lastError = err.message || err.toString();
-          (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} error: ${lastError}`);
-          resolve();
-        });
-      });
+          testSocket.addEventListener("close", (event: any) => {
+            if (!wsSuccess) {
+              lastCode = event.code;
+              lastReason = event.reason || `Code ${event.code}`;
+              (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} closed (Code ${event.code}: ${lastReason})`);
+            }
+            finish();
+          });
 
-      if (wsSuccess) break;
-    }
+          testSocket.addEventListener("error", (event: any) => {
+            lastError = event.message || "Unknown WebSocket error";
+            (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} error: ${lastError}`);
+            finish();
+          });
+        } else {
+          // Node runtime (local dev / `node dist/server.js`): the `ws` package supports
+          // custom Authorization headers directly.
+          const testSocket = new WSWebSocket(testWsUrl, {
+            headers: { "Authorization": `Token ${apiKey}` },
+            handshakeTimeout: 4000
+          });
+
+          timeout = setTimeout(() => {
+            lastError = `Handshake timeout on ${testWsUrl}`;
+            try { testSocket.close(); } catch { }
+            finish();
+          }, 4000);
+
+          testSocket.on("open", () => {
+            wsSuccess = true;
+            report.step3_wsTest.success = true;
+            report.step3_wsTest.logs = (report.step3_wsTest.logs || []).concat(`Successfully connected to ${testWsUrl}`);
+            try { testSocket.close(1000, "Diagnostic test complete"); } catch { }
+            finish();
+          });
+
+          testSocket.on("close", (code, reason) => {
+            if (!wsSuccess) {
+              lastCode = code;
+              lastReason = reason.toString() || `Code ${code}`;
+              (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} closed (Code ${code}: ${lastReason})`);
+            }
+            finish();
+          });
+
+          testSocket.on("error", (err) => {
+            lastError = err.message || err.toString();
+            (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Endpoint ${testWsUrl} error: ${lastError}`);
+            finish();
+          });
+        }
+      } catch (e: any) {
+        lastError = e.message || String(e);
+        (report.step3_wsTest.logs = report.step3_wsTest.logs || []).push(`Failed to open test socket: ${lastError}`);
+        finish();
+      }
+    });
 
     report.step3_wsTest.success = wsSuccess;
     if (!wsSuccess) {
@@ -6055,7 +6097,7 @@ app.post("/api/deepgram/setup", async (req, res) => {
 
     const projectsData = (await projectsRes.json()) as any;
     let projects = projectsData.projects || [];
-    
+
     const targetProjectId = projectId || process.env.DEEPGRAM_PROJECT_ID || process.env.VITE_DEEPGRAM_PROJECT_ID;
     if (targetProjectId) {
       logs.push(`[SERVER-DEEPGRAM] Targeting specified Project ID: ${targetProjectId}`);
@@ -6337,11 +6379,11 @@ if (!isWorker && process.env.NODE_ENV !== "production") {
 const HOST = process.env.HOST || "127.0.0.1";
 const server = app.listen(PORT, HOST, async () => {
   console.log(`AI Opportunity Discovery Engine running on http://localhost:${PORT}`);
-  
+
   if (supabase) {
     await syncSupabaseOnStartup();
   }
-  
+
   if (!isWorker) {
     initScheduler(); // Start the continuous background daemon on boot!
   }
@@ -6394,7 +6436,7 @@ if (!isWorker) {
     const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
 
     console.log(`[SERVER-WS-PROXY] Connecting strictly to Deepgram Conversational Voice Agent: ${targetUrl}`);
-    
+
     let currentDgSocket: WSWebSocket | null = null;
     let isClosed = false;
     let keepAliveTimer: NodeJS.Timeout | null = null;
@@ -6408,18 +6450,18 @@ if (!isWorker) {
         keepAliveTimer = null;
       }
       console.log(`[SERVER-WS-PROXY] Connection cleanup. Code: ${code}, Reason: ${reason}`);
-      
+
       try {
         if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
           ws.close(code, reason);
         }
-      } catch (e) {}
+      } catch (e) { }
 
       try {
         if (currentDgSocket && (currentDgSocket.readyState === currentDgSocket.OPEN || currentDgSocket.readyState === currentDgSocket.CONNECTING)) {
           currentDgSocket.close(code, reason);
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     // Start server-side KeepAlive interval (every 3 seconds) to ensure Deepgram socket never times out
@@ -6427,7 +6469,7 @@ if (!isWorker) {
       if (!isClosed && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
         try {
           currentDgSocket.send(JSON.stringify({ type: "KeepAlive" }));
-        } catch (e) {}
+        } catch (e) { }
       }
     }, 3000);
 
@@ -6473,7 +6515,7 @@ if (!isWorker) {
             description: `Deepgram Voice Agent connection closed (Code ${code}: ${reasonStr})`,
             code: code
           }));
-        } catch (e) {}
+        } catch (e) { }
       }
       cleanup(code, reasonStr);
     });
@@ -6487,7 +6529,7 @@ if (!isWorker) {
             description: `Deepgram Voice Agent connection error: ${err.message || err}`,
             code: "DEEPGRAM_AGENT_ERROR"
           }));
-        } catch (e) {}
+        } catch (e) { }
       }
       cleanup(1011, `Deepgram Voice Agent link error: ${err.message || err}`);
     });
@@ -6537,7 +6579,23 @@ export default {
       }
 
       if (!apiKey) {
-        return new Response("Deepgram API key is missing.", { status: 400 });
+        console.error("[WORKER-WS-PROXY] Denied: No Deepgram API Key available. (Check that DEEPGRAM_API_KEY is set via `wrangler secret put`, not just in .env)");
+        return new Response("Deepgram API key is missing. Set DEEPGRAM_API_KEY as a Cloudflare secret (wrangler secret put DEEPGRAM_API_KEY).", { status: 400 });
+      }
+
+      // Same agent-ID fallback logic as the Node proxy: env binding first, then auto-resolve/create via the Deepgram API.
+      if (!agentId) {
+        agentId = env.DEEPGRAM_AGENT_ID || env.VITE_DEEPGRAM_AGENT_ID || (await getOrFetchDeepgramAgentId(apiKey));
+      }
+
+      // Sanitize utterance_end_ms the same way the Node proxy does — Deepgram rejects values under 1000ms.
+      let sanitizedUtteranceEndMs: number | null = null;
+      const rawUtteranceEnd = url.searchParams.get("utterance_end_ms");
+      if (rawUtteranceEnd) {
+        const parsedVal = parseInt(rawUtteranceEnd, 10);
+        if (!isNaN(parsedVal)) {
+          sanitizedUtteranceEndMs = Math.max(1000, parsedVal);
+        }
       }
 
       // Create native WebSocket pair
@@ -6555,45 +6613,92 @@ export default {
       if (sampleRate) params.set("sample_rate", sampleRate);
       const channels = url.searchParams.get("channels");
       if (channels) params.set("channels", channels);
+      if (sanitizedUtteranceEndMs) params.set("utterance_end_ms", String(sanitizedUtteranceEndMs));
 
       const queryString = params.toString();
       if (queryString) {
         dgUrl += "?" + queryString;
       }
 
+      console.log(`[WORKER-WS-PROXY] Connecting to Deepgram Conversational Voice Agent: ${dgUrl}`);
+
       // @ts-ignore
       const dgSocket = new WebSocket(dgUrl, ["token", apiKey]);
 
-      // Keepalive timer for edge proxy
+      let isClosed = false;
+      let dgOpen = false;
+      const pendingBuffer: any[] = [];
+
+      // Keepalive timer for edge proxy — prevents Deepgram from timing out an idle connection
       const keepAliveTimer = setInterval(() => {
         try {
-          dgSocket.send(JSON.stringify({ type: "KeepAlive" }));
-        } catch (e) {}
+          if (!isClosed && dgOpen && dgSocket.readyState === 1 /* OPEN */) {
+            dgSocket.send(JSON.stringify({ type: "KeepAlive" }));
+          }
+        } catch (e) { }
       }, 3000);
 
-      const cleanup = () => {
+      const cleanup = (code?: number, reason?: string) => {
+        if (isClosed) return;
+        isClosed = true;
         clearInterval(keepAliveTimer);
-        try { serverWs.close(); } catch (e) {}
-        try { dgSocket.close(); } catch (e) {}
+        console.log(`[WORKER-WS-PROXY] Connection cleanup. Code: ${code}, Reason: ${reason}`);
+        try { serverWs.close(code, reason); } catch (e) { }
+        try { dgSocket.close(); } catch (e) { }
       };
 
-      // Pipe Browser -> Deepgram
+      // Pipe Browser -> Deepgram (buffer anything sent before the Deepgram handshake finishes)
       serverWs.addEventListener("message", (event: any) => {
-        try {
-          dgSocket.send(event.data);
-        } catch (e) {}
+        if (isClosed) return;
+        if (dgOpen && dgSocket.readyState === 1) {
+          try { dgSocket.send(event.data); } catch (e) { }
+        } else {
+          pendingBuffer.push(event.data);
+        }
       });
-      serverWs.addEventListener("close", cleanup);
-      serverWs.addEventListener("error", cleanup);
+      serverWs.addEventListener("close", () => cleanup(1000, "Client closed connection"));
+      serverWs.addEventListener("error", () => cleanup(1011, "Client socket error"));
+
+      dgSocket.addEventListener("open", () => {
+        console.log("[WORKER-WS-PROXY] Deepgram Conversational Voice Agent connection open & ready!");
+        dgOpen = true;
+        while (pendingBuffer.length > 0) {
+          const data = pendingBuffer.shift();
+          try { dgSocket.send(data); } catch (e) { }
+        }
+      });
 
       // Pipe Deepgram -> Browser
       dgSocket.addEventListener("message", (event: any) => {
-        try {
-          serverWs.send(event.data);
-        } catch (e) {}
+        if (isClosed) return;
+        try { serverWs.send(event.data); } catch (e) { }
       });
-      dgSocket.addEventListener("close", cleanup);
-      dgSocket.addEventListener("error", cleanup);
+
+      // Relay the real close reason back to the client instead of failing silently
+      dgSocket.addEventListener("close", (event: any) => {
+        const reasonStr = event.reason || `Close code ${event.code}`;
+        console.log(`[WORKER-WS-PROXY] Deepgram connection closed. Code: ${event.code}, Reason: ${reasonStr}`);
+        try {
+          serverWs.send(JSON.stringify({
+            type: "Warning",
+            description: `Deepgram Voice Agent connection closed (Code ${event.code}: ${reasonStr})`,
+            code: event.code
+          }));
+        } catch (e) { }
+        cleanup(event.code, reasonStr);
+      });
+
+      dgSocket.addEventListener("error", (event: any) => {
+        console.error("[WORKER-WS-PROXY] Deepgram link error:", event.message || event);
+        try {
+          serverWs.send(JSON.stringify({
+            type: "Error",
+            description: `Deepgram Voice Agent connection error: ${event.message || "Unknown error"}`,
+            code: "DEEPGRAM_AGENT_ERROR"
+          }));
+        } catch (e) { }
+        cleanup(1011, `Deepgram Voice Agent link error: ${event.message || event}`);
+      });
 
       return new Response(null, {
         status: 101,
