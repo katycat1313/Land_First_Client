@@ -1086,7 +1086,7 @@ export default function PacOverlay({
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
-    const wsUrl = `${protocol}//${window.location.host}/api/deepgram/ws?key=${encodeURIComponent(apiKey)}` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "") + `&encoding=linear16&sample_rate=16000&channels=1`;
+    const wsUrl = `${protocol}//${window.location.host}/api/deepgram/ws?key=${encodeURIComponent(apiKey)}` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "") + `&encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -1267,7 +1267,7 @@ This will automatically update your database and notes so you do not forget them
               think: {
                 provider: {
                   type: "google",
-                  model: "gemini-3.5-flash"
+                  model: "gemini-1.5-flash"
                 },
                 prompt: pacSystemPrompt,
                 functions: [
@@ -2102,6 +2102,7 @@ registerProcessor('pcm-processor', PCMProcessor);
       try {
         const injectPayload = {
           type: "InjectUserMessage",
+          content: currentMsg,
           message: currentMsg
         };
         dgSocketRef.current.send(JSON.stringify(injectPayload));
