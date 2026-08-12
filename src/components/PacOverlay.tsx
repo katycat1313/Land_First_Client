@@ -1036,7 +1036,7 @@ export default function PacOverlay({
     connectDeepgram();
   };
 
-  const connectDeepgram = () => {
+  const connectDeepgram = async () => {
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -1082,14 +1082,27 @@ export default function PacOverlay({
     setDgLifecycleStatus("Connecting...");
     setDgCloseCode(null);
     setDgCloseReason("");
-    setComputerLogs(prev => [...prev, "[DEEPGRAM] Connecting to Voice Agent WebSocket..."]);
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
-    const wsUrl = `${protocol}//${window.location.host}/api/deepgram/ws?key=${encodeURIComponent(apiKey)}` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "") + `&encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000`;
+    setComputerLogs(prev => [...prev, "[DEEPGRAM] Fetching authorization token..."]);
 
     try {
-      const ws = new WebSocket(wsUrl);
+      // 1. Fetch short-lived token from server backend
+      const tokenRes = await apiFetch("/api/deepgram/token");
+      if (!tokenRes.ok) {
+        throw new Error(`HTTP token request failed: ${tokenRes.status}`);
+      }
+      const tokenData = await tokenRes.json();
+      const tempToken = tokenData.access_token;
+      if (!tempToken) {
+        throw new Error("Server did not return a valid access token.");
+      }
+
+      setComputerLogs(prev => [...prev, "[DEEPGRAM] Establishing direct low-latency WebSocket connection..."]);
+
+      const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
+      // Connect DIRECTLY to Deepgram's Conversational Voice Agent API to bypass proxy latency
+      const wsUrl = `wss://agent.deepgram.com/v1/agent/converse?encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "");
+
+      const ws = new WebSocket(wsUrl, ["token", tempToken]);
       ws.binaryType = "arraybuffer";
       dgSocketRef.current = ws;
       (window as any).__activeDgSocket = ws;

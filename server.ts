@@ -5786,8 +5786,38 @@ app.get("/api/deepgram/config", async (req, res) => {
     apiKeyPreview: apiKey ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : "",
     apiKey: apiKey,
     agentId: agentId,
-    projectId: projectId
   });
+});
+
+app.get("/api/deepgram/token", async (req, res) => {
+  const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+  if (!apiKey) {
+    return res.status(400).json({ error: "No Deepgram API key configured on server." });
+  }
+
+  try {
+    const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
+      method: "POST",
+      headers: {
+        "Authorization": `Token ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        ttl_seconds: 60
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to grant token: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json() as any;
+    res.json({ access_token: data.access_token });
+  } catch (error: any) {
+    console.error("[DEEPGRAM-TOKEN] Failed to generate temporary token:", error);
+    res.status(500).json({ error: error.message || "Failed to generate token" });
+  }
 });
 
 app.get("/api/deepgram/list-agents", async (req, res) => {
