@@ -159,7 +159,7 @@ export default function PublicLandingView({
             ) : (
               <button
                 onClick={onOpenFounderLogin}
-                className="flex items-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition-all"
+                className="founder-login-btn flex items-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition-all"
                 title="Founder Access Portal"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-400" />

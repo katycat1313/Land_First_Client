@@ -94,3 +94,12 @@
 .animate-spin-slow {
   animation: spinSlow 12s linear infinite;
 }
+
+/* Override Founder Portal button text with CSS as requested by user */
+.founder-login-btn span {
+  display: none !important;
+}
+.founder-login-btn::after {
+  content: "Log In" !important;
+}
+
