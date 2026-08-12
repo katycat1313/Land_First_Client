@@ -140,7 +140,7 @@ export default function PacOverlay({
   }, [speechPlaybackRate]);
 
   const apiFetch = async (url: string, options: RequestInit = {}) => {
-    const pwd = localStorage.getItem("PAC_SESSION_PASSWORD") || "";
+    const pwd = localStorage.getItem("app_password") || "";
     const headers = {
       ...(options.headers || {}),
       "X-App-Password": pwd
@@ -194,7 +194,7 @@ export default function PacOverlay({
     try {
       const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
       const url = `/api/deepgram/list-agents` + (activeKey ? `?key=${encodeURIComponent(activeKey)}` : "");
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
 
       if (!res.ok) {
@@ -216,7 +216,7 @@ export default function PacOverlay({
   useEffect(() => {
     const fetchAgentMemory = async () => {
       try {
-        const res = await fetch("/api/agent/memory");
+        const res = await apiFetch("/api/agent/memory");
         if (res.ok) {
           const data = await res.json();
           setAgentMemory(data);
@@ -275,7 +275,7 @@ export default function PacOverlay({
         subState.deepgramVoice = "degraded";
         issuesList.push("Deepgram Voice API key missing. Running on WebSpeech browser fallback.");
       } else {
-        const dgRes = await fetch(`/api/deepgram/config?key=${encodeURIComponent(activeKey)}`);
+        const dgRes = await apiFetch(`/api/deepgram/config?key=${encodeURIComponent(activeKey)}`);
         if (!dgRes.ok) {
           subState.deepgramVoice = "degraded";
           issuesList.push("Deepgram Voice API returned non-OK status. WebSpeech fallback active.");
@@ -291,7 +291,7 @@ export default function PacOverlay({
 
     // 2. Memory Bank Check
     try {
-      const memRes = await fetch("/api/agent/memory");
+      const memRes = await apiFetch("/api/agent/memory");
       if (!memRes.ok) {
         subState.memoryBank = false;
         issuesList.push("Agent Memory API unreachable.");
@@ -303,7 +303,7 @@ export default function PacOverlay({
 
     // 3. Gemini Chat AI Endpoint Check
     try {
-      const chatRes = await fetch("/api/pac/chat", {
+      const chatRes = await apiFetch("/api/pac/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: "diagnostics_ping", history: [] })
@@ -367,7 +367,7 @@ export default function PacOverlay({
 
   const handleSaveAgentMemory = async (updatedMemory: typeof agentMemory) => {
     try {
-      const res = await fetch("/api/agent/memory", {
+      const res = await apiFetch("/api/agent/memory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -555,7 +555,7 @@ export default function PacOverlay({
   useEffect(() => {
     const fetchServerDeepgramConfig = async () => {
       try {
-        const response = await fetch("/api/deepgram/config");
+        const response = await apiFetch("/api/deepgram/config");
         if (response.ok) {
           const config = await response.json();
           if (config.hasApiKey) {
@@ -595,7 +595,7 @@ export default function PacOverlay({
     try {
       const activeKey = dgApiKey || (import.meta as any).env.VITE_DEEPGRAM_API_KEY;
       const url = `/api/deepgram/diagnose` + (activeKey ? `?key=${encodeURIComponent(activeKey)}` : "");
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       const data = await res.json();
 
       // Append Browser Client WebSocket Status
@@ -633,7 +633,7 @@ export default function PacOverlay({
     // If no key in local state, query server config before throwing error
     if (!apiKey) {
       try {
-        const response = await fetch("/api/deepgram/config");
+        const response = await apiFetch("/api/deepgram/config");
         if (response.ok) {
           const config = await response.json();
           if (config.apiKey) {
@@ -655,7 +655,7 @@ export default function PacOverlay({
     try {
       setComputerLogs(prev => [...prev, `[DEEPGRAM-SETUP] Initiating secure server-side setup workflow ${forceNew ? "(Force New Agent Generation)" : "(Auto-Detect)"}...`]);
 
-      const response = await fetch("/api/deepgram/setup", {
+      const response = await apiFetch("/api/deepgram/setup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -2121,7 +2121,7 @@ registerProcessor('pcm-processor', PCMProcessor);
     }
 
     try {
-      const response = await fetch("/api/pac/chat", {
+      const response = await apiFetch("/api/pac/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
