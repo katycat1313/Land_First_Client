@@ -1352,8 +1352,6 @@ This will automatically update your database and notes so you do not forget them
         });
 
         if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
-          const byteSize = event.data instanceof Blob ? event.data.size : event.data.byteLength;
-          console.log(`[P.A.C. WS] Received binary WebSocket message (${event.data instanceof Blob ? "Blob" : "ArrayBuffer"}), size: ${byteSize} bytes`);
           playPcmChunk(event.data);
         } else if (typeof event.data === "string") {
           console.log("[P.A.C. WS] Received text/JSON message:", event.data);
