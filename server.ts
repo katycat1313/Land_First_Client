@@ -6571,7 +6571,7 @@ export default {
       serverWs.accept();
 
       // Establish outgoing WebSocket connection to Deepgram Voice Agent via fetch
-      const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
+      const targetUrl = "https://agent.deepgram.com/v1/agent/converse";
       const dgRes = await fetch(targetUrl, {
         headers: {
           "Upgrade": "websocket",
