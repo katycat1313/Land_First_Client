@@ -154,16 +154,16 @@ export default function PublicLandingView({
                 className="flex items-center gap-1.5 text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-1.5 rounded-lg font-semibold shadow-md shadow-amber-500/20 transition-all"
               >
                 <Unlock className="w-3.5 h-3.5" />
-                Founder Radar
+                Dashboard
               </button>
             ) : (
               <button
                 onClick={onOpenFounderLogin}
-                className="founder-login-btn flex items-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition-all"
+                className="flex items-center gap-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition-all"
                 title="Founder Access Portal"
               >
                 <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden sm:inline">Founder Portal</span>
+                <span className="hidden sm:inline">Log In</span>
               </button>
             )}
           </div>
@@ -513,10 +513,6 @@ export default function PublicLandingView({
                     <span className="text-slate-400">Request ID:</span>
                     <span className="font-mono text-amber-400">{submitSuccess.leadId}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Est. Monthly Opportunity:</span>
-                    <span className="font-mono text-emerald-400 font-bold">${submitSuccess.estimatedMonthlyLoss?.toLocaleString() || "3,500"}/mo</span>
-                  </div>
                   <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
                     We will send your custom revenue recovery overview directly to <span className="text-white font-medium">{email || phone || "your contact handle"}</span>.
                   </div>
@@ -707,8 +703,17 @@ export default function PublicLandingView({
               onClick={isUnlocked ? onSwitchToDashboard : onOpenFounderLogin}
               className="text-slate-400 hover:text-amber-400 transition-colors flex items-center gap-1"
             >
-              <Lock className="w-3 h-3 text-amber-400" />
-              <span>Founder Portal</span>
+              {isUnlocked ? (
+                <>
+                  <Unlock className="w-3 h-3 text-amber-400" />
+                  <span>Dashboard</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  <span>Log In</span>
+                </>
+              )}
             </button>
           </div>
         </div>
