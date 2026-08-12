@@ -11,7 +11,7 @@ interface OllamaTunnelModalProps {
 }
 
 export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: OllamaTunnelModalProps) {
-  const [baseUrl, setBaseUrl] = useState("https://numbly-clapping-filling.ngrok-free.dev");
+  const [baseUrl, setBaseUrl] = useState("https://your-ollama-tunnel.trycloudflare.com");
   const [model, setModel] = useState("qwen2.5:7b-instruct-q4_k_m");
   const [provider, setProvider] = useState<"auto" | "ollama" | "gemini">("auto");
 
@@ -29,7 +29,7 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [activeSetupTab, setActiveSetupTab] = useState<"powershell" | "cloudflare" | "pinggy" | "ngrok" | "lan">("powershell");
+  const [activeSetupTab, setActiveSetupTab] = useState<"powershell" | "cloudflare" | "pinggy" | "lan">("powershell");
 
   // Fetch current LLM config on mount
   useEffect(() => {
@@ -210,7 +210,7 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
                   className="w-full bg-[#01070e] border border-slate-700 focus:border-cyan-500 text-white rounded-xl py-2 px-3 text-xs font-mono focus:outline-none transition"
                 />
                 <p className="text-[11px] text-slate-400">
-                  Enter your Cloudflare Tunnel, Ngrok, Pinggy, LocalTunnel, or LAN IP URL pointing to port 11434 on your G14 / Mac.
+                  Enter your Cloudflare Tunnel, Pinggy, or LAN IP URL pointing to port 11434 on your G14 / Mac.
                 </p>
               </div>
 
@@ -350,16 +350,6 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
                 🔗 Pinggy SSH
               </button>
               <button
-                onClick={() => setActiveSetupTab("ngrok")}
-                className={`pb-2 px-3 border-b-2 font-medium transition cursor-pointer ${
-                  activeSetupTab === "ngrok"
-                    ? "border-cyan-400 text-cyan-400 font-bold"
-                    : "border-transparent text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                🚀 Ngrok / LocalTunnel
-              </button>
-              <button
                 onClick={() => setActiveSetupTab("lan")}
                 className={`pb-2 px-3 border-b-2 font-medium transition cursor-pointer ${
                   activeSetupTab === "lan"
@@ -477,46 +467,6 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
                 <p className="text-[11px] text-slate-400">
                   Copy the HTTPS URL generated in your terminal into the Tunnel URL field above.
                 </p>
-              </div>
-            )}
-
-            {activeSetupTab === "ngrok" && (
-              <div className="space-y-2 text-xs">
-                <p className="text-slate-300 font-semibold">Option A: Standard Ngrok Tunnel</p>
-                <div className="bg-[#01070e] p-3 rounded-lg border border-slate-800 font-mono text-slate-200 flex items-center justify-between text-[11px]">
-                  <span>ngrok http 11434</span>
-                  <button
-                    onClick={() => copyToClipboard('ngrok http 11434', 4)}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition cursor-pointer"
-                  >
-                    {copiedIndex === 4 ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                  </button>
-                </div>
-
-                <p className="text-slate-300 font-semibold pt-1.5">Option B: Multi-Tunnel / Shared Domain (Pooling Enabled)</p>
-                <p className="text-[11px] text-slate-400">
-                  Fixes <code className="text-rose-300 font-mono">ERR_NGROK_334</code> when running active tunnels on both Mac (n8n port 5678) and G14 (Ollama port 11434) using the same static domain:
-                </p>
-                <div className="bg-[#01070e] p-3 rounded-lg border border-slate-800 font-mono text-slate-200 flex items-center justify-between text-[11px]">
-                  <span>ngrok http 5678 --pooling-enabled</span>
-                  <button
-                    onClick={() => copyToClipboard('ngrok http 5678 --pooling-enabled', 40)}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition cursor-pointer"
-                  >
-                    {copiedIndex === 40 ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                  </button>
-                </div>
-
-                <p className="text-slate-300 font-semibold pt-1.5">Option C: LocalTunnel (No ngrok domain collision)</p>
-                <div className="bg-[#01070e] p-3 rounded-lg border border-slate-800 font-mono text-slate-200 flex items-center justify-between text-[11px]">
-                  <span>npx localtunnel --port 11434</span>
-                  <button
-                    onClick={() => copyToClipboard('npx localtunnel --port 11434', 5)}
-                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition cursor-pointer"
-                  >
-                    {copiedIndex === 5 ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                  </button>
-                </div>
               </div>
             )}
 
