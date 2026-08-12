@@ -1267,7 +1267,7 @@ This will automatically update your database and notes so you do not forget them
               think: {
                 provider: {
                   type: "google",
-                  model: "gemini-3.6-flash"
+                  model: "gemini-3.5-flash"
                 },
                 prompt: pacSystemPrompt,
                 functions: [
