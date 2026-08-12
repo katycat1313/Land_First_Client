@@ -1330,14 +1330,8 @@ This will automatically update your database and notes so you do not forget them
 
         if (keepAliveIntervalRef.current) {
           clearInterval(keepAliveIntervalRef.current);
+          keepAliveIntervalRef.current = null;
         }
-        keepAliveIntervalRef.current = setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            try {
-              ws.send(JSON.stringify({ type: "KeepAlive" }));
-            } catch (err) { }
-          }
-        }, 3000);
 
         if (!isMicMuted) {
           startDgMic();

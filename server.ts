@@ -6468,7 +6468,7 @@ if (!isWorker) {
     keepAliveTimer = setInterval(() => {
       if (!isClosed && currentDgSocket && currentDgSocket.readyState === WSWebSocket.OPEN) {
         try {
-          currentDgSocket.send(JSON.stringify({ type: "KeepAlive" }));
+          currentDgSocket.ping();
         } catch (e) { }
       }
     }, 3000);
@@ -6629,19 +6629,9 @@ export default {
       let dgOpen = false;
       const pendingBuffer: any[] = [];
 
-      // Keepalive timer for edge proxy — prevents Deepgram from timing out an idle connection
-      const keepAliveTimer = setInterval(() => {
-        try {
-          if (!isClosed && dgOpen && dgSocket.readyState === 1 /* OPEN */) {
-            dgSocket.send(JSON.stringify({ type: "KeepAlive" }));
-          }
-        } catch (e) { }
-      }, 3000);
-
       const cleanup = (code?: number, reason?: string) => {
         if (isClosed) return;
         isClosed = true;
-        clearInterval(keepAliveTimer);
         console.log(`[WORKER-WS-PROXY] Connection cleanup. Code: ${code}, Reason: ${reason}`);
         try { serverWs.close(code, reason); } catch (e) { }
         try { dgSocket.close(); } catch (e) { }
