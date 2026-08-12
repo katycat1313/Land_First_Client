@@ -6642,10 +6642,14 @@ export default {
       // Pipe Browser -> Deepgram (buffer anything sent before the Deepgram handshake finishes)
       serverWs.addEventListener("message", (event: any) => {
         if (isClosed) return;
+        let data = event.data;
+        if (data && typeof data !== "string") {
+          data = new Uint8Array(data);
+        }
         if (dgOpen && dgSocket.readyState === 1) {
-          try { dgSocket.send(event.data); } catch (e) { }
+          try { dgSocket.send(data); } catch (e) { }
         } else {
-          pendingBuffer.push(event.data);
+          pendingBuffer.push(data);
         }
       });
       serverWs.addEventListener("close", () => cleanup(1000, "Client closed connection"));
@@ -6655,7 +6659,10 @@ export default {
         console.log("[WORKER-WS-PROXY] Deepgram Conversational Voice Agent connection open & ready!");
         dgOpen = true;
         while (pendingBuffer.length > 0) {
-          const data = pendingBuffer.shift();
+          let data = pendingBuffer.shift();
+          if (data && typeof data !== "string") {
+            data = new Uint8Array(data);
+          }
           try { dgSocket.send(data); } catch (e) { }
         }
       });
@@ -6663,7 +6670,11 @@ export default {
       // Pipe Deepgram -> Browser
       dgSocket.addEventListener("message", (event: any) => {
         if (isClosed) return;
-        try { serverWs.send(event.data); } catch (e) { }
+        let data = event.data;
+        if (data && typeof data !== "string") {
+          data = new Uint8Array(data);
+        }
+        try { serverWs.send(data); } catch (e) { }
       });
 
       // Relay the real close reason back to the client instead of failing silently

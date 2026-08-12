@@ -1723,7 +1723,7 @@ registerProcessor('pcm-processor', PCMProcessor);
                   const s = Math.max(-1, Math.min(1, inputBuffer[i]));
                   pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
-                dgSocketRef.current.send(pcm16.buffer);
+                dgSocketRef.current.send(new Uint8Array(pcm16.buffer));
               }
             };
 
@@ -1748,7 +1748,7 @@ registerProcessor('pcm-processor', PCMProcessor);
                 const s = Math.max(-1, Math.min(1, inputBuffer[i]));
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
               }
-              dgSocketRef.current.send(pcm16.buffer);
+              dgSocketRef.current.send(new Uint8Array(pcm16.buffer));
             }
           };
 
