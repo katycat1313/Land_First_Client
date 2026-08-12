@@ -6297,7 +6297,7 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
           },
           config: JSON.stringify({
             think: {
-              provider: { type: "google", model: "gemini-1.5-flash" },
+              provider: { type: "google", model: "gemini-3.5-flash" },
               prompt: pacSystemPrompt
             },
             listen: {
