@@ -5791,31 +5791,37 @@ app.get("/api/deepgram/config", async (req, res) => {
 
 app.get("/api/deepgram/token", async (req, res) => {
   const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+  const projectId = process.env.DEEPGRAM_PROJECT_ID || process.env.VITE_DEEPGRAM_PROJECT_ID || "ef8bbf75-cc92-4a83-8a01-4215d9af7302";
+  
   if (!apiKey) {
     return res.status(400).json({ error: "No Deepgram API key configured on server." });
   }
 
   try {
-    const response = await fetch("https://api.deepgram.com/v1/auth/grant", {
+    // Generate a temporary API key with a 60-second TTL and 'member' scope
+    const response = await fetch(`https://api.deepgram.com/v1/projects/${projectId}/keys`, {
       method: "POST",
       headers: {
         "Authorization": `Token ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        ttl_seconds: 60
+        comment: "Temporary Client Voice Session Key",
+        scopes: ["member"],
+        time_to_live_in_seconds: 60
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Failed to grant token: ${response.status} ${errorText}`);
+      throw new Error(`Failed to create temporary key: ${response.status} ${errorText}`);
     }
 
     const data = await response.json() as any;
-    res.json({ access_token: data.access_token });
+    // Return the generated key as the access_token
+    res.json({ access_token: data.key });
   } catch (error: any) {
-    console.error("[DEEPGRAM-TOKEN] Failed to generate temporary token:", error);
+    console.error("[DEEPGRAM-TOKEN] Failed to generate temporary project key:", error);
     res.status(500).json({ error: error.message || "Failed to generate token" });
   }
 });
