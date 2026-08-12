@@ -6602,6 +6602,7 @@ export default {
       // @ts-ignore
       const [clientWs, serverWs] = Object.values(new WebSocketPair()) as any[];
       serverWs.accept();
+      serverWs.binaryType = "arraybuffer";
 
       // Establish native outgoing WebSocket connection to Deepgram Voice Agent
       let dgUrl = "wss://agent.deepgram.com/v1/agent/converse";
@@ -6624,6 +6625,7 @@ export default {
 
       // @ts-ignore
       const dgSocket = new WebSocket(dgUrl, ["token", apiKey]);
+      dgSocket.binaryType = "arraybuffer";
 
       let isClosed = false;
       let dgOpen = false;
