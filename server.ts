@@ -6325,24 +6325,29 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
 
         const cleanVoice = voice || "aura-2-jupiter-en";
 
-        // Proper Deepgram Voice Agent creation schema
         const createPayload = {
-          name: "P.A.C. Partner Agent",
+          name: "Partner Agent",
           metadata: {
-            title: "P.A.C. Partner Agent"
+            title: "Partner Agent"
           },
           config: JSON.stringify({
-            think: {
-              provider: { type: "open_ai", model: "gpt-4o-mini" },
-              prompt: pacSystemPrompt
-            },
-            listen: {
-              provider: { type: "deepgram", version: "v2", model: "flux-general-en" }
-            },
-            speak: {
-              provider: { type: "deepgram", model: cleanVoice }
-            },
-            greeting: "Hi, my name is P.A.C, Your Partner of Autonomous Capabilities. I am your new business partner. I specialize in service client aquicsitions and together we are going to land your first client. Are you ready???"
+            agent: {
+              think: {
+                provider: { type: "open_ai", model: "gpt-4o-mini" },
+                prompt: pacSystemPrompt
+              },
+              listen: {
+                provider: { type: "deepgram", version: "v2", model: "flux-general-en" }
+              },
+              speak: {
+                provider: {
+                  type: "deepgram",
+                  model: cleanVoice,
+                  ...(cleanVoice.startsWith("flux-") ? { version: "v2" } : {})
+                }
+              },
+              greeting: "Hi, my name is P.A.C, Your Partner of Autonomous Capabilities. I am your new business partner. I specialize in service client aquicsitions and together we are going to land your first client. Are you ready???"
+            }
           })
         };
 
