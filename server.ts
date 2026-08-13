@@ -6361,7 +6361,7 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
                   },
                   {
                     name: "update_opportunity_card",
-                    description: "Updates the details of a specific opportunity card in the database, such as editing its status (e.g. 'saved', 'ignored'), adding/updating custom notes, or adding research information.",
+                    description: "Updates the details of a specific opportunity card in the database, such as editing its status (e.g. 'Saved', 'Contacted', 'Archived'), adding/updating custom notes, or adding research information.",
                     parameters: {
                       type: "object",
                       properties: {
@@ -6371,15 +6371,19 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
                         },
                         status: {
                           type: "string",
-                          description: "The new status of the opportunity (e.g. 'saved', 'ignored'). Optional."
+                          description: "The new status of the opportunity (e.g. 'Saved', 'Contacted', 'Archived'). Optional."
                         },
                         notes: {
                           type: "string",
                           description: "Custom notes to append or set on the opportunity card. Optional."
                         },
-                        lead_info: {
-                          type: "object",
-                          description: "Updates to the contact/lead information on the card, such as research findings, contact name, or email. Optional."
+                        contact_email: {
+                          type: "string",
+                          description: "The contact email address for this lead. Optional."
+                        },
+                        estimated_deal_value: {
+                          type: "number",
+                          description: "The estimated revenue/deal value for this lead. Optional."
                         }
                       },
                       required: ["opportunity_id"]

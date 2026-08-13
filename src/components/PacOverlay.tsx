@@ -1470,7 +1470,7 @@ This will automatically update your database and notes so you do not forget them
                     id: o.id,
                     title: o.title,
                     industry: o.industry,
-                    sentiment: o.sentiment || "unclassified"
+                    classification: o.classification || "help_seeker"
                   }));
                   
                   if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
@@ -1537,13 +1537,15 @@ This will automatically update your database and notes so you do not forget them
                   if (matchedOpp) {
                     const status = args.status;
                     const notes = args.notes;
-                    const lead_info = args.lead_info;
+                    const contactEmail = args.contact_email;
+                    const estimatedDealValue = args.estimated_deal_value;
                     
                     const updatedOpp = {
                       ...matchedOpp,
                       ...(status ? { status } : {}),
                       ...(notes ? { notes } : {}),
-                      ...(lead_info ? { leadInfo: { ...(matchedOpp.leadInfo || {}), ...lead_info } } : {})
+                      ...(contactEmail ? { contactEmail } : {}),
+                      ...(estimatedDealValue !== undefined ? { estimatedDealValue } : {})
                     };
                     
                     setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Persisting changes to Opportunity Card: "${matchedOpp.title || matchedOpp.id}"...`]);
