@@ -2222,8 +2222,8 @@ export default function App() {
                       <div className="flex flex-col gap-2 pt-1">
                         {[
                           { text: "💡 Critique my current B2B pitch structure", prompt: "I'd like a raw critique of my B2B software value proposition structure. What are the top 3 mistakes solo developers make when pitching small business owners, and how do we fix them?" },
-                          { text: "📊 Brainstorm local service bottlenecks", prompt: "Let's brainstorm high-converting automation bottlenecks in the medical/dental and real estate sectors. What manual work are clinic staff doing that we can automate in 3 days?" },
-                          { text: "🤝 Map out pricing proposal structures", prompt: "How should I structure my pricing proposals for a customized MVP? Can we brainstorm standard upfront + subscription maintenance tier packages that clinic or agency owners are comfortable with?" },
+                          { text: "📊 Brainstorm local service bottlenecks", prompt: "Let's brainstorm high-converting automation bottlenecks in the field services (HVAC, plumbing, roofing) and real estate sectors. What manual work are office coordinators or field crews doing that we can automate in 3 days?" },
+                          { text: "🤝 Map out pricing proposal structures", prompt: "How should I structure my pricing proposals for a customized MVP? Can we brainstorm standard upfront + subscription maintenance tier packages that home contractors or boutique marketing agency owners are comfortable with?" },
                           { text: "🧠 Draft a warm-up email strategy", prompt: "I found a perfect prospect. What's a non-spammy way to start a conversion with them on Reddit or LinkedIn without sounding like a salesperson?" }
                         ].map((starter, idx) => (
                           <button

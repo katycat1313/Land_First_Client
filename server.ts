@@ -383,7 +383,7 @@ async function generateUnifiedLLM({
 
   // Gemini Fallback
   const ai = getGeminiClient();
-  const geminiModels = ["gemini-1.5-flash", "gemini-flash-latest"];
+  const geminiModels = ["gemini-1.5-flash-latest", "gemini-flash-latest"];
 
   let fullPromptText = prompt;
   if (systemPrompt) {
@@ -1133,7 +1133,7 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     const prompt = `
       You are an elite opportunity analyzer for solo developers. You analyze raw forum comments, customer complaints, or business workflow descriptions and extract highly qualified product development signals.
@@ -1283,7 +1283,7 @@ async function generateSemanticQueries(targetSector: string, keyword: string): P
 
     console.log(`[Semantic Query Builder] Querying Gemini to generate organic, non-tech human queries for Sector: "${targetSector}", Keywords: "${keyword || 'None'}"...`);
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -2167,7 +2167,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
 
     logTrace("Initializing Gemini AI Client...");
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     let semanticQueries: string[] = [];
     if (isLiteral) {
@@ -2705,7 +2705,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
     console.log(`Scraped ${markdown.length} characters. Analyzing with Gemini...`);
 
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     const prompt = `
       You are an elite opportunity analyzer and text classifier for solo developers. You analyze raw web page content, forum threads, or customer grievances scraped from the web and extract highly qualified product development signals.
@@ -3164,7 +3164,7 @@ Return strictly valid JSON with key:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3396,7 +3396,7 @@ Return strictly valid JSON with this structure:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash-latest",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -3492,7 +3492,7 @@ Return JSON:
 
         const aiClient = getGeminiClient();
         const response = await aiClient.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: "gemini-1.5-flash-latest",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -4183,7 +4183,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               `;
 
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-1.5-flash-latest",
                 contents: prompt,
                 config: {
                   responseMimeType: "application/json"
@@ -4277,7 +4277,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-1.5-flash-latest",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -4355,7 +4355,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-1.5-flash-latest",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4436,7 +4436,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-1.5-flash-latest",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4535,7 +4535,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-1.5-flash-latest",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4614,7 +4614,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-1.5-flash-latest",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4704,7 +4704,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-1.5-flash-latest",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -4791,7 +4791,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-1.5-flash-latest",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -4882,7 +4882,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-1.5-flash-latest",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5116,7 +5116,7 @@ async function executeOfflineTasks() {
         `;
 
         const response = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
+          model: "gemini-1.5-flash-latest",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -5223,7 +5223,7 @@ function initScheduler() {
 
   schedulerTimer = setInterval(() => {
     console.log("[Scheduler Daemon] ⏰ Interval triggered. Initiating background sweep...");
-    
+
     // Inactivity Alert Check
     const timeSinceLastActivity = Date.now() - lastUserActivityTimestamp;
     // 12 hours = 12 * 60 * 60 * 1000
@@ -5293,7 +5293,7 @@ app.post("/api/partner/chat", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     let contextPrompt = `You are 'ScoutPartner', an elite B2B Sales Strategist, Positioning Consultant, and copywriter specialized in winning custom-software and high-ticket automation consulting deals.
 Your partner is a solo software developer and automation engineer who has built an "Opportunity Radar" app.
@@ -5353,7 +5353,7 @@ app.post("/api/learning/simulate", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     // Take top 4 opportunities to keep payload size optimal
     const sample = opportunities.slice(0, 4);
@@ -5431,7 +5431,7 @@ app.post("/api/learning/optimize", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
     const botConfig = loadBotConfig();
 
     // Group current opportunities to feed outcomes
@@ -5768,7 +5768,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     });
 
     // Request structured JSON output from Gemini with valid fallback models & backoff
-    const modelCandidates = ["gemini-1.5-flash", "gemini-flash-latest"];
+    const modelCandidates = ["gemini-1.5-flash-latest", "gemini-flash-latest"];
     let response: any = null;
     let lastError: any = null;
 
@@ -5984,7 +5984,7 @@ app.get("/api/deepgram/config", async (req, res) => {
 app.get("/api/deepgram/token", async (req, res) => {
   const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
   const projectId = process.env.DEEPGRAM_PROJECT_ID || process.env.VITE_DEEPGRAM_PROJECT_ID || "ef8bbf75-cc92-4a83-8a01-4215d9af7302";
-  
+
   if (!apiKey) {
     return res.status(400).json({ error: "No Deepgram API key configured on server." });
   }
