@@ -1459,6 +1459,141 @@ This will automatically update your database and notes so you do not forget them
                   console.error("Failed to decode base64 audio chunk:", err);
                 }
               }
+            } else if (msg.type === "FunctionCallRequest") {
+              const calls = msg.functions || [];
+              for (const call of calls) {
+                console.log(`[P.A.C. Tool] Received FunctionCallRequest: ${call.name} (ID: ${call.id})`, call.arguments);
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Partner requested execution of: ${call.name}`]);
+                
+                if (call.name === "list_opportunities") {
+                  const list = (opportunities || []).map(o => ({
+                    id: o.id,
+                    title: o.title,
+                    industry: o.industry,
+                    sentiment: o.sentiment || "unclassified"
+                  }));
+                  
+                  if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                    dgSocketRef.current.send(JSON.stringify({
+                      type: "FunctionCallResponse",
+                      id: call.id,
+                      name: "list_opportunities",
+                      content: JSON.stringify({ opportunities: list })
+                    }));
+                    console.log(`[P.A.C. Tool] Sent FunctionCallResponse for list_opportunities (ID: ${call.id})`);
+                  }
+                } else if (call.name === "pull_up_card") {
+                  let args: any = {};
+                  try {
+                    args = JSON.parse(call.arguments || "{}");
+                  } catch (e) {
+                    console.error("Failed to parse function call arguments:", e);
+                  }
+                  
+                  const targetId = args.opportunity_id;
+                  const matchedOpp = (opportunities || []).find(o => 
+                    o.id === targetId || 
+                    (o.title && o.title.toLowerCase().includes(String(targetId).toLowerCase()))
+                  );
+                  
+                  if (matchedOpp) {
+                    onSelectOpportunity?.(matchedOpp);
+                    if (onNavigateView) onNavigateView('board');
+                    setIsMinimized(true);
+                    setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Automatically pulled up Opportunity Card: "${matchedOpp.title || matchedOpp.id}" on screen.`]);
+                    
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "FunctionCallResponse",
+                        id: call.id,
+                        name: "pull_up_card",
+                        content: JSON.stringify({ success: true, message: `Successfully opened card: ${matchedOpp.title}` })
+                      }));
+                      console.log(`[P.A.C. Tool] Sent FunctionCallResponse for pull_up_card success (ID: ${call.id})`);
+                    }
+                  } else {
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Opportunity ID "${targetId}" not found.`]);
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "FunctionCallResponse",
+                        id: call.id,
+                        name: "pull_up_card",
+                        content: JSON.stringify({ success: false, error: "Opportunity ID not found in dashboard." })
+                      }));
+                      console.log(`[P.A.C. Tool] Sent FunctionCallResponse for pull_up_card failure (ID: ${call.id})`);
+                    }
+                  }
+                } else if (call.name === "update_opportunity_card") {
+                  let args: any = {};
+                  try {
+                    args = JSON.parse(call.arguments || "{}");
+                  } catch (e) {
+                    console.error("Failed to parse function call arguments:", e);
+                  }
+                  
+                  const targetId = args.opportunity_id;
+                  const matchedOpp = (opportunities || []).find(o => o.id === targetId);
+                  
+                  if (matchedOpp) {
+                    const status = args.status;
+                    const notes = args.notes;
+                    const lead_info = args.lead_info;
+                    
+                    const updatedOpp = {
+                      ...matchedOpp,
+                      ...(status ? { status } : {}),
+                      ...(notes ? { notes } : {}),
+                      ...(lead_info ? { leadInfo: { ...(matchedOpp.leadInfo || {}), ...lead_info } } : {})
+                    };
+                    
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Persisting changes to Opportunity Card: "${matchedOpp.title || matchedOpp.id}"...`]);
+                    
+                    // Call the local API /api/opportunities/save to persist the changes
+                    apiFetch("/api/opportunities/save", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(updatedOpp)
+                    }).then(res => {
+                      if (res.ok) {
+                        onRefreshOpportunities?.();
+                        setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Successfully updated Opportunity Card: "${matchedOpp.title || matchedOpp.id}"`]);
+                        
+                        if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                          dgSocketRef.current.send(JSON.stringify({
+                            type: "FunctionCallResponse",
+                            id: call.id,
+                            name: "update_opportunity_card",
+                            content: JSON.stringify({ success: true, message: `Successfully updated card: ${matchedOpp.title}` })
+                          }));
+                        }
+                      } else {
+                        throw new Error(`Failed to save: ${res.status}`);
+                      }
+                    }).catch(err => {
+                      console.error("Failed to save opportunity changes via tool:", err);
+                      setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Failed to save updates to database.`]);
+                      if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                        dgSocketRef.current.send(JSON.stringify({
+                          type: "FunctionCallResponse",
+                          id: call.id,
+                          name: "update_opportunity_card",
+                          content: JSON.stringify({ success: false, error: err.message || "Failed to save card updates." })
+                        }));
+                      }
+                    });
+                  } else {
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Opportunity ID "${targetId}" not found for update.`]);
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "FunctionCallResponse",
+                        id: call.id,
+                        name: "update_opportunity_card",
+                        content: JSON.stringify({ success: false, error: "Opportunity ID not found in database." })
+                      }));
+                    }
+                  }
+                }
+              }
             } else if (msg.type === "SystemNotice") {
               setComputerLogs(prev => [...prev, `[SYSTEM-NOTICE] ${msg.message}`]);
             } else if (msg.type === "Error") {

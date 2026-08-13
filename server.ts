@@ -6334,7 +6334,57 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
             agent: {
               think: {
                 provider: { type: "open_ai", model: "gpt-4o-mini" },
-                prompt: pacSystemPrompt
+                prompt: pacSystemPrompt,
+                functions: [
+                  {
+                    name: "list_opportunities",
+                    description: "Retrieves the list of active opportunities/leads currently in the database. Call this to review available leads before recommending one.",
+                    parameters: {
+                      type: "object",
+                      properties: {}
+                    }
+                  },
+                  {
+                    name: "pull_up_card",
+                    description: "Pulls up and displays a specific opportunity/lead card in the user's dashboard view.",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        opportunity_id: {
+                          type: "string",
+                          description: "The unique ID of the opportunity card to display."
+                        }
+                      },
+                      required: ["opportunity_id"]
+                    }
+                  },
+                  {
+                    name: "update_opportunity_card",
+                    description: "Updates the details of a specific opportunity card in the database, such as editing its status (e.g. 'saved', 'ignored'), adding/updating custom notes, or adding research information.",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        opportunity_id: {
+                          type: "string",
+                          description: "The unique ID of the opportunity to update."
+                        },
+                        status: {
+                          type: "string",
+                          description: "The new status of the opportunity (e.g. 'saved', 'ignored'). Optional."
+                        },
+                        notes: {
+                          type: "string",
+                          description: "Custom notes to append or set on the opportunity card. Optional."
+                        },
+                        lead_info: {
+                          type: "object",
+                          description: "Updates to the contact/lead information on the card, such as research findings, contact name, or email. Optional."
+                        }
+                      },
+                      required: ["opportunity_id"]
+                    }
+                  }
+                ]
               },
               listen: {
                 provider: { type: "deepgram", version: "v2", model: "flux-general-en" }
