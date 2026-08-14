@@ -458,7 +458,7 @@ async function generateUnifiedLLM({
 
   // Gemini Fallback
   const ai = getGeminiClient();
-  const geminiModels = ["gemini-1.5-flash-latest", "gemini-flash-latest"];
+  const geminiModels = ["gemini-3.5-flash", "gemini-3.5-flash"];
 
   let fullPromptText = prompt;
   if (systemPrompt) {
@@ -1310,7 +1310,7 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
 
     const prompt = `
       You are an elite opportunity analyzer for solo developers. You analyze raw forum comments, customer complaints, or business workflow descriptions and extract highly qualified product development signals.
@@ -1460,7 +1460,7 @@ async function generateSemanticQueries(targetSector: string, keyword: string): P
 
     console.log(`[Semantic Query Builder] Querying Gemini to generate organic, non-tech human queries for Sector: "${targetSector}", Keywords: "${keyword || 'None'}"...`);
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash-latest",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -2407,7 +2407,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
 
     logTrace("Initializing Gemini AI Client...");
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
 
     let semanticQueries: string[] = [];
     if (isLiteral) {
@@ -2968,7 +2968,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
     console.log(`Scraped ${markdown.length} characters. Analyzing with Gemini...`);
 
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
 
     const prompt = `
       You are an elite opportunity analyzer and text classifier for solo developers. You analyze raw web page content, forum threads, or customer grievances scraped from the web and extract highly qualified product development signals.
@@ -3377,7 +3377,7 @@ Return strictly valid JSON with key:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-1.5-flash-latest",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3609,7 +3609,7 @@ Return strictly valid JSON with this structure:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-1.5-flash-latest",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -3705,7 +3705,7 @@ Return JSON:
 
         const aiClient = getGeminiClient();
         const response = await aiClient.models.generateContent({
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -4410,7 +4410,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               `;
 
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: {
                   responseMimeType: "application/json"
@@ -4504,7 +4504,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash-latest",
+              model: "gemini-3.5-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -4582,7 +4582,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4663,7 +4663,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4778,7 +4778,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               `;
 
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4873,7 +4873,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4952,7 +4952,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-1.5-flash-latest",
+                model: "gemini-3.5-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -5042,7 +5042,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-2.5-flash",
+              model: "gemini-3.5-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5129,7 +5129,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash-latest",
+              model: "gemini-3.5-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5220,7 +5220,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-1.5-flash-latest",
+              model: "gemini-3.5-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5454,7 +5454,7 @@ async function executeOfflineTasks() {
         `;
 
         const response = await ai.models.generateContent({
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -5702,7 +5702,7 @@ Return a JSON array with up to 3 qualified opportunities:
         let newOpps: any[] = [];
         try {
           const genRes = await ai.models.generateContent({
-            model: "gemini-1.5-flash-latest",
+            model: "gemini-3.5-flash",
             contents: evalPrompt
           });
           const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -5784,7 +5784,7 @@ Extract up to 3 qualified opportunities in JSON format:
       let discovered: any[] = [];
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           contents: evalPrompt
         });
         const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -5946,7 +5946,7 @@ Rules:
       let generatedDraft = "";
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-1.5-flash-latest",
+          model: "gemini-3.5-flash",
           contents: draftPrompt
         });
         generatedDraft = genRes.text || targetOpp.responseDraft;
@@ -6033,7 +6033,7 @@ Respond in 1-2 short, high-impact paragraphs. Zero corporate buzzwords.`;
     let replyText = "";
     try {
       const genRes = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.5-flash",
         contents: prompt
       });
       replyText = genRes.text || "";
@@ -6155,7 +6155,7 @@ app.post("/api/partner/chat", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
 
     let contextPrompt = `You are 'ScoutPartner', an elite B2B Sales Strategist, Positioning Consultant, and copywriter specialized in winning custom-software and high-ticket automation consulting deals.
 Your partner is a solo software developer and automation engineer who has built an "Opportunity Radar" app.
@@ -6215,7 +6215,7 @@ app.post("/api/learning/simulate", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
 
     // Take top 4 opportunities to keep payload size optimal
     const sample = opportunities.slice(0, 4);
@@ -6293,7 +6293,7 @@ app.post("/api/learning/optimize", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-3.5-flash";
     const botConfig = loadBotConfig();
 
     // Group current opportunities to feed outcomes
@@ -6524,7 +6524,7 @@ Available Action Tags:
    - [ACTION: NAVIGATE: learning] -> Switches main screen to Self-Learning Engine
 
 2. Pull Up Specific Problem / Opportunity Card:
-   - [ACTION: OPEN_OPPORTUNITY: <id_or_keyword>] -> Automatically pulls up and opens the Opportunity Detail Drawer on screen for the specified opportunity ID or keyword! (e.g., [ACTION: OPEN_OPPORTUNITY: HVAC] or [ACTION: OPEN_OPPORTUNITY: opp_1720000000001]).
+   - [ACTION: OPEN_OPPORTUNITY: <id_or_keyword>] -> Automatically pulls up and opens the Opportunity Detail Drawer on screen for the specified opportunity ID or keyword! (e.g., [ACTION: OPEN_OPPORTUNITY: HVAC] or [ACTION: OPEN_OPPORTUNITY: discovered-reddit-1786745552943]).
 
 3. Present Proposal, Document, Outreach, or Strategy Plan for Approval:
    - Wrap proposals, outreach emails, or strategy plans in code blocks so they pop up directly in the interactive review modal on screen:
@@ -6630,7 +6630,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     });
 
     // Request structured JSON output from Gemini with valid fallback models & backoff
-    const modelCandidates = ["gemini-1.5-flash-latest", "gemini-flash-latest"];
+    const modelCandidates = ["gemini-3.5-flash", "gemini-3.5-flash"];
     let response: any = null;
     let lastError: any = null;
 

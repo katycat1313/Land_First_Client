@@ -452,10 +452,10 @@ export default function PacOverlay({
         o.author.toLowerCase().includes(query) ||
         (o.problemSummary && o.problemSummary.toLowerCase().includes(query)) ||
         o.industry.toLowerCase().includes(query)
-      ) || (opportunities.length > 0 ? opportunities[0] : null);
+      ) || null;
     } else {
-      // Fallback check for opp_ ID pattern in text
-      const idMatch = text.match(/\b(opp_[a-z0-9_-]+)\b/i);
+      // Fallback check for opp_ or discovered- ID pattern in text
+      const idMatch = text.match(/\b((?:opp_|discovered-)[a-z0-9_-]+)\b/i);
       if (idMatch) {
         const idQuery = idMatch[1].toLowerCase();
         matchedOpp = opportunities.find(o => o.id.toLowerCase() === idQuery || o.id.toLowerCase().includes(idQuery)) || null;
@@ -467,7 +467,7 @@ export default function PacOverlay({
       const words = text.toLowerCase().split(/\s+/);
       matchedOpp = opportunities.find(o => 
         words.some(w => w.length > 3 && (o.title.toLowerCase().includes(w) || o.industry.toLowerCase().includes(w) || o.id.toLowerCase().includes(w)))
-      ) || (opportunities.length > 0 ? opportunities[0] : null);
+      ) || null;
     }
 
     if (matchedOpp) {
@@ -1461,7 +1461,7 @@ This will automatically update your database and notes so you do not forget them
                   o.title.toLowerCase().includes(query) ||
                   (o.problemSummary && o.problemSummary.toLowerCase().includes(query)) ||
                   o.industry.toLowerCase().includes(query)
-                ) || (opportunities.length > 0 ? opportunities[0] : null);
+                ) || null;
 
                 if (matched) {
                   onSelectOpportunity?.(matched);
@@ -2356,12 +2356,15 @@ registerProcessor('pcm-processor', PCMProcessor);
       // Process any action tags or document generation in assistant text
       processTranscriptText(pacText);
 
-      // If P.A.C. took autonomous actions, log them in the computer terminal
+      // If P.A.C. took autonomous actions, log them in the computer terminal and execute them
       if (data.actions && Array.isArray(data.actions)) {
         setComputerLogs(prev => [
           ...prev,
           ...data.actions.map((act: string) => `[PAC-EXEC] ${act}`)
         ].slice(-50));
+        data.actions.forEach((act: string) => {
+          processTranscriptText(act);
+        });
       }
 
       // Speak response out loud
