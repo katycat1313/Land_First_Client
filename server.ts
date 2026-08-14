@@ -4456,8 +4456,8 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
           try {
             const results = await scrapeRedditPublicJSON("pain OR manual OR tedious OR \"anyone else\" OR " + target.urlOrPath, target.name);
             scrapedComments.push(...results);
-          } catch (e) {
-            logs.push(`[${plat.platformName}] ⚠️ Direct crawl of r/${target.urlOrPath} faced a transient rate limit or parsed empty.`);
+          } catch (e: any) {
+            logs.push(`[${plat.platformName}] ⚠️ Direct crawl of r/${target.urlOrPath} failed: ${e.message || e}`);
           }
         }
 
@@ -4527,8 +4527,8 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
             } else {
               logs.push(`[${plat.platformName}] ℹ️ No new software-addressable problems found during this cycle.`);
             }
-          } catch (err) {
-            logs.push(`[${plat.platformName}] ⚠️ Failed to extract pain points using Gemini due to transient response issues.`);
+          } catch (err: any) {
+            logs.push(`[${plat.platformName}] ⚠️ Failed to extract pain points using Gemini: ${err.message || err}`);
           }
         } else {
           logs.push(`[${plat.platformName}] ℹ️ No new active discussions found matching targeted keywords.`);
@@ -4605,14 +4605,14 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               } else {
                 logs.push(`[${plat.platformName}] ℹ️ No new software-addressable problems found in this Ask HN cycle.`);
               }
-            } catch (err) {
-              logs.push(`[${plat.platformName}] ⚠️ Failed to extract HN pain points using Gemini due to transient response issues.`);
+            } catch (err: any) {
+              logs.push(`[${plat.platformName}] ⚠️ Failed to extract HN pain points using Gemini: ${err.message || err}`);
             }
           } else {
             logs.push(`[${plat.platformName}] ℹ️ No active Ask HN discussions detected.`);
           }
-        } catch (e) {
-          logs.push(`[${plat.platformName}] ⚠️ Hacker News live scan faced a transient connection delay.`);
+        } catch (e: any) {
+          logs.push(`[${plat.platformName}] ⚠️ Hacker News live scan failed: ${e.message || e}`);
         }
       }
 
@@ -4686,14 +4686,14 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               } else {
                 logs.push(`[${plat.platformName}] ℹ️ No new software-addressable problems found in this GitHub Issues cycle.`);
               }
-            } catch (err) {
-              logs.push(`[${plat.platformName}] ⚠️ Failed to extract GitHub pain points using Gemini due to transient response issues.`);
+            } catch (err: any) {
+              logs.push(`[${plat.platformName}] ⚠️ Failed to extract GitHub pain points using Gemini: ${err.message || err}`);
             }
           } else {
             logs.push(`[${plat.platformName}] ℹ️ No active GitHub issues detected.`);
           }
-        } catch (e) {
-          logs.push(`[${plat.platformName}] ⚠️ GitHub live scan faced a transient connection delay.`);
+        } catch (e: any) {
+          logs.push(`[${plat.platformName}] ⚠️ GitHub live scan failed: ${e.message || e}`);
         }
       }
 

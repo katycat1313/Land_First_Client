@@ -437,14 +437,21 @@ export default function PacOverlay({
       if (validViews.includes(targetView)) {
         onNavigateView?.(targetView as any);
         setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Switched main app view to '${targetView}'.`]);
+      } else {
+        setComputerLogs(prev => [...prev, `[P.A.C. ERROR] ❌ Failed to navigate view: '${targetView}' is not a valid screen view. Valid views: ${validViews.join(', ')}`]);
       }
     }
 
     // 0b. UI Action Tag & Keyword Interceptions for Opportunity Card Drawer
     let matchedOpp: Opportunity | null = null;
+    let attemptedOpen = false;
+    let queryUsed = "";
+
     const oppMatch = text.match(/\[ACTION:\s*OPEN_OPPORTUNITY:\s*([^\]]+)\]/i);
     if (oppMatch) {
+      attemptedOpen = true;
       const query = oppMatch[1].trim().toLowerCase();
+      queryUsed = query;
       matchedOpp = opportunities.find(o => 
         o.id.toLowerCase() === query ||
         o.id.toLowerCase().includes(query) ||
@@ -457,14 +464,19 @@ export default function PacOverlay({
       // Fallback check for opp_ or discovered- ID pattern in text
       const idMatch = text.match(/\b((?:opp_|discovered-)[a-z0-9_-]+)\b/i);
       if (idMatch) {
+        attemptedOpen = true;
         const idQuery = idMatch[1].toLowerCase();
+        queryUsed = idQuery;
         matchedOpp = opportunities.find(o => o.id.toLowerCase() === idQuery || o.id.toLowerCase().includes(idQuery)) || null;
       }
     }
 
     // Natural speech pattern fallback for opening card
     if (!matchedOpp && (/(?:pull|open|show|display)(?:ing|ed|s)?\s+(?:up\s+)?(?:the\s+)?(?:card|opportunity|lead|prospect|hvac|plumbing|roofing)/i.test(text))) {
+      attemptedOpen = true;
       const words = text.toLowerCase().split(/\s+/);
+      const targetWord = words.find(w => w.length > 3 && !['pull', 'open', 'show', 'display', 'the', 'card', 'opportunity', 'lead', 'prospect'].includes(w));
+      queryUsed = targetWord || "unknown keyword";
       matchedOpp = opportunities.find(o => 
         words.some(w => w.length > 3 && (o.title.toLowerCase().includes(w) || o.industry.toLowerCase().includes(w) || o.id.toLowerCase().includes(w)))
       ) || null;
@@ -476,6 +488,8 @@ export default function PacOverlay({
       // Auto-minimize overlay window so it doesn't block the opportunity drawer on screen!
       setIsMinimized(true);
       setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Automatically pulled up Opportunity Card: "${matchedOpp.title || matchedOpp.id}" on screen.`]);
+    } else if (attemptedOpen) {
+      setComputerLogs(prev => [...prev, `[P.A.C. ERROR] ❌ Failed to open opportunity: No match found in the database for query or ID "${queryUsed}".`]);
     }
 
     // 0c. Diagnostics Action Interception
