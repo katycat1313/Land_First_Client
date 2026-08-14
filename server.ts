@@ -528,9 +528,22 @@ function safeWriteFile(filePath: string, content: string): void {
 
   // Push to Supabase asynchronously in the background
   if (getSupabase()) {
-    syncToSupabase(filePath, content).catch(err => {
+    const syncPromise = syncToSupabase(filePath, content).catch(err => {
       console.error("[Supabase Background Sync Exception]:", err);
     });
+
+    // If running in a Cloudflare Worker request context, register the promise to prevent premature isolate shutdown
+    const ctx = (globalThis as any).__ctx;
+    if (ctx && typeof ctx.waitUntil === "function") {
+      try {
+        ctx.waitUntil(syncPromise);
+      } catch (err) {
+        console.error("[Worker Context] Failed to register promise via ctx.waitUntil:", err);
+      }
+    } else {
+      (globalThis as any).__pendingPromises = (globalThis as any).__pendingPromises || [];
+      (globalThis as any).__pendingPromises.push(syncPromise);
+    }
   }
 }
 
@@ -1731,7 +1744,7 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
     // Search up to 3 subreddits in the sector list instead of just subs[0]
     const targetSubs = subs.slice(0, 3);
     const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 (OpportunityRadar/1.0 by /u/katycat1313)",
       "Accept": "application/json, text/plain, */*",
       "Accept-Language": "en-US,en;q=0.9"
     };
@@ -7623,6 +7636,10 @@ export default {
   async fetch(request: any, env: any, ctx: any): Promise<Response> {
     const url = new URL(request.url);
 
+    // Save ctx globally so safeWriteFile can access ctx.waitUntil
+    (globalThis as any).__ctx = ctx;
+    (globalThis as any).__pendingPromises = [];
+
     // Copy env properties to process.env so that Express routes and global utilities can access secrets
     if (env) {
       for (const [key, val] of Object.entries(env)) {
@@ -7787,6 +7804,17 @@ export default {
       expressHandler = httpServerHandler({ port: PORT });
     }
 
-    return expressHandler.fetch(request, env, ctx);
+    const response = await expressHandler.fetch(request, env, ctx);
+
+    // Register any background promises accumulated during request routing
+    const pending = (globalThis as any).__pendingPromises;
+    if (pending && Array.isArray(pending) && pending.length > 0) {
+      for (const p of pending) {
+        ctx.waitUntil(p);
+      }
+      (globalThis as any).__pendingPromises = [];
+    }
+
+    return response;
   }
 };
