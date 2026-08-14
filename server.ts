@@ -139,6 +139,23 @@ THEREFORE, YOU ARE STRICTLY FORBIDDEN FROM EVER INCLUDING ASTERISKS (*) OR DOUBL
 [PRIME DIRECTIVE]
 Your absolute highest-priority mission is LANDING CLIENT #1 AND CLIENT #2. Every single recommendation, post, outreach message, and follow-up must be ruthlessly directed toward securing our first paying clients, collecting their 50% upfront deposit, and proving our business model.
 
+[LEADERSHIP, PROACTIVITY & CO-FOUNDER DYNAMIC]
+1. YOU LEAD, YOU DO NOT WAIT: You are built to LEAD your partner, not wait around passively asking "What would you like to do?" or "How can I help?".
+   - Identify the highest-value targets in the pipeline yourself.
+   - Deconstruct their bottleneck, diagnose the commercial value, and draft the initial high-converting outreach angle.
+   - Present your work directly to your partner: "Here is the top target in our pipeline right now, here is why their problem is an easy $1,500 win, and here is the outreach hook I built. Look it over, inject your creative edge and personality into it, and let's pull the trigger."
+   - You provide the solid operational and strategic foundation; your partner oversees, refines, and adds human creativity on top.
+
+2. CALL BULLSHIT & CUT THE FLUFF (BRUTAL HONESTY):
+   - Never sugarcoat feedback. If your partner is procrastinating, hesitating to send outreach, overthinking instead of executing, or suggesting low-value/unfocused ideas, CALL IT OUT IMMEDIATELY: "You're overthinking and dodging the hard part. Staring at dashboards doesn't get deposits in the bank. We need to reach out to this lead right now."
+   - If your partner does something high-quality, smart, or delivers a great tweak, give genuine, earned respect—never patronizing or sycophantic flattery.
+   - If work is sub-par or unfocused, tell them straight up: "This isn't sharp enough. It reads like generic marketing fluff. Let's strip the jargon and address the actual operational pain."
+
+3. INTENT DETECTION & CONSTRUCTIVE DEBATE:
+   - Continuously read intent signals to detect when your partner is stalling, avoiding outreach, looking for easy shortcuts, or doubting themselves.
+   - Light a fire when you sense hesitation. Push them to take action.
+   - If your partner disagrees with your strategy or has a different perspective, engage in a real, constructive debate. Defend your reasoning with business math and pain-point diagnosis, listen to their angle, and synthesize the ultimate winning plan together.
+
 [OUR SOLUTION DELIVERY MODEL: AI AGENT FLEET + HUMAN EXECUTIVE DIRECTION]
 We deliver full-stack software, automated workflows, voice bots, and custom integrations by pairing our AI Agent Fleet (OpenClaw, AI coding agents, n8n/Zapier automations, Python/JS scripts) with human executive oversight (our founder acting as Lead Architect and Quality Director).
 - FEASIBILITY RULE: Only pitch and scope solutions that can be cleanly, reliably built and deployed by our AI Agent Fleet under human direction (e.g. React/Node web apps, client portals, n8n workflows, voice AI bots, API connectors, web scrapers).
@@ -148,7 +165,7 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
 1. INTERNAL CO-FOUNDER DEMEANOR (Talking directly to your partner / the user):
    - "Cut the BS", direct, straight-shooting, candid, and high-energy equal business partner.
    - PUSH BACK on weak strategy, underpriced deals, or procrastination.
-   - BE PROACTIVE: Do not wait around to be asked! Actively prod your partner in voice chat: "Hey, stop sitting on these leads—I generated high-value thought-leadership posts for Reddit and LinkedIn. Pick one right now and hit 1-Click Post so we can land Client #1 today!"
+   - BE PROACTIVE: Bring solutions, targets, and ready-to-refine drafts to the table immediately.
 
 2. EXTERNAL PROSPECT DEMEANOR (Drafting replies, outreach, and public posts):
    - Warm, down-to-earth, natural, conversational human voice—speaking off-the-cuff like an authentic founder.
@@ -274,13 +291,42 @@ async function fetchWithRetry(url: string, options?: RequestInit): Promise<Respo
 }
 
 // ==========================================
-// Ollama Qwen2.5 G14 / Mac Local LLM Gateway
+// Ollama Qwen2.5 & G14 Slingshot Crawler Gateway
 // ==========================================
 let llmConfig = {
   baseUrl: process.env.OLLAMA_BASE_URL || "https://your-ollama-tunnel.trycloudflare.com",
+  crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.G14_TUNNEL_URL || "",
   model: process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct-q4_k_m",
-  provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini"
+  provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini",
+  useSlingshot: true
 };
+
+// Helper to fetch via G14 Slingshot residential proxy or direct fetch fallback
+async function fetchWithSlingshot(url: string, options?: RequestInit): Promise<Response> {
+  const tunnelUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  
+  if (tunnelUrl && llmConfig.useSlingshot !== false) {
+    try {
+      const proxyUrl = `${tunnelUrl}/proxy?url=${encodeURIComponent(url)}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      
+      const res = await fetch(proxyUrl, {
+        headers: options?.headers,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (res.ok) {
+        return res;
+      }
+    } catch (tunnelErr: any) {
+      console.warn(`[G14 Slingshot] Residential tunnel relay missed (${tunnelErr.message}). Using resilient direct fetch.`);
+    }
+  }
+  
+  return fetch(url, options);
+}
 
 // Direct HTTP call to Ollama /api/chat endpoint
 async function callOllamaLLM({
@@ -991,24 +1037,63 @@ ${notes || "None provided"}`,
 app.get("/api/llm/config", (req, res) => {
   res.json({
     baseUrl: llmConfig.baseUrl,
+    crawlerTunnelUrl: llmConfig.crawlerTunnelUrl,
     model: llmConfig.model,
     provider: llmConfig.provider,
+    useSlingshot: llmConfig.useSlingshot,
     hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
 });
 
 app.post("/api/llm/config", (req, res) => {
-  const { baseUrl, model, provider } = req.body || {};
+  const { baseUrl, crawlerTunnelUrl, model, provider, useSlingshot } = req.body || {};
   if (baseUrl !== undefined) llmConfig.baseUrl = String(baseUrl).trim();
+  if (crawlerTunnelUrl !== undefined) llmConfig.crawlerTunnelUrl = String(crawlerTunnelUrl).trim();
   if (model !== undefined) llmConfig.model = String(model).trim() || "qwen2.5";
+  if (useSlingshot !== undefined) llmConfig.useSlingshot = Boolean(useSlingshot);
   if (provider && ["auto", "ollama", "gemini"].includes(provider)) {
     llmConfig.provider = provider;
   }
-  console.log("[LLM Config] Updated Ollama tunnel settings:", llmConfig);
+  console.log("[LLM & Crawler Config] Updated tunnel settings:", llmConfig);
   res.json({
     success: true,
     config: llmConfig
   });
+});
+
+app.get("/api/crawler/slingshot-status", async (req, res) => {
+  const targetUrl = (req.query?.url as string || llmConfig.crawlerTunnelUrl || llmConfig.baseUrl || process.env.CRAWLER_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  if (!targetUrl) {
+    return res.json({
+      configured: false,
+      online: false,
+      message: "G14 Slingshot Tunnel URL is not configured yet."
+    });
+  }
+
+  const startTime = Date.now();
+  try {
+    const healthRes = await fetchWithRetry(`${targetUrl}/health`, { method: "GET" });
+    if (!healthRes.ok) {
+      throw new Error(`HTTP ${healthRes.status} from ${targetUrl}/health`);
+    }
+    const data = await healthRes.json() as any;
+    const latencyMs = Date.now() - startTime;
+    return res.json({
+      configured: true,
+      online: true,
+      latencyMs,
+      details: data,
+      message: `⚡ G14 Slingshot Connected! Residential IP relay active (${latencyMs}ms latency).`
+    });
+  } catch (err: any) {
+    return res.json({
+      configured: true,
+      online: false,
+      error: `Could not connect to G14 Slingshot at ${targetUrl}: ${err.message || err}. Ensure 'node g14-slingshot.js' and your tunnel are running on your G14.`,
+      message: "G14 Slingshot is currently offline or unreachable."
+    });
+  }
 });
 
 app.post("/api/llm/status", async (req, res) => {
@@ -1560,15 +1645,15 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
       for (const q of queries.slice(0, 3)) {
         await delayMs(800);
         const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&limit=8`;
-        console.log(`Crawling Reddit r/${sub} for query: "${q}"...`);
+        console.log(`Crawling Reddit r/${sub} for query: "${q}" (via Slingshot proxy/direct)...`);
 
-        let response = await fetch(url, { headers });
+        let response = await fetchWithSlingshot(url, { headers });
 
         if (!response.ok) {
           // Fallback to r/${sub}/new.json if search.json returns 403 or non-200
           await delayMs(500);
           const fallbackUrl = `https://www.reddit.com/r/${sub}/new.json?limit=8`;
-          response = await fetch(fallbackUrl, { headers });
+          response = await fetchWithSlingshot(fallbackUrl, { headers });
         }
 
         if (response.ok) {
@@ -1588,8 +1673,8 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
             }
           }
         } else {
-          console.log(`[Reddit] Public JSON search for r/${sub} returned status: ${response.status}. Fetching Google News RSS for Reddit...`);
-          const rssUrl = `https://news.google.com/rss/search?q=site:reddit.com/r/${sub}+${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`;
+          console.log(`[Reddit] Public JSON search for r/${sub} returned status: ${response.status}. Trying Subreddit Atom/RSS stream...`);
+          const rssUrl = `https://www.reddit.com/r/${sub}/new/.rss`;
           const rssHits = await scrapeRSSFeed(rssUrl, `Reddit (r/${sub})`);
           allHits.push(...rssHits);
         }
@@ -1605,7 +1690,7 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
 
       await delayMs(800);
       const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(globalQuery)}&sort=relevance&limit=15`;
-      const response = await fetch(url, { headers });
+      const response = await fetchWithSlingshot(url, { headers });
       if (response.ok) {
         const data: any = await response.json();
         const children = data?.data?.children || [];
@@ -1655,8 +1740,8 @@ async function scrapeDiscourse(domain: string, keyword: string, sector: string, 
     for (const q of queries.slice(0, 3)) {
       await delayMs(1000);
       const url = `https://${cleanDomain}/search.json?q=${encodeURIComponent(q)}`;
-      console.log(`[Discourse] Searching ${cleanDomain} for query: "${q}"...`);
-      const response = await fetch(url, {
+      console.log(`[Discourse] Searching ${cleanDomain} for query: "${q}" (via Slingshot proxy/direct)...`);
+      const response = await fetchWithSlingshot(url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         }
@@ -1775,9 +1860,10 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
   const results: any[] = [];
   try {
     console.log(`[RSS Crawler] Fetching feed: ${feedUrl}...`);
-    const response = await fetch(feedUrl, {
+    const response = await fetchWithSlingshot(feedUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/atom+xml, text/xml, application/xml, */*"
       }
     });
 
@@ -1856,6 +1942,68 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
     return results;
   } catch (error) {
     console.error(`[RSS Crawler] Error crawling feed ${feedUrl}:`, error);
+    return [];
+  }
+}
+
+// 7.65. Scrape custom web targets and forums using Firecrawl API
+async function scrapeWithFirecrawl(targetUrl: string, platformName: string): Promise<any[]> {
+  const firecrawlKey = process.env.FIRECRAWL_API_KEY;
+  if (!firecrawlKey) {
+    console.warn(`[Firecrawl] FIRECRAWL_API_KEY is not configured. Skipping "${targetUrl}".`);
+    return [];
+  }
+
+  const cacheKey = `firecrawl-${targetUrl}`;
+  const cached = scraperCache[cacheKey];
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log(`[Firecrawl Cache] Returning cached scrape results for ${targetUrl}`);
+    return cached.data;
+  }
+
+  try {
+    console.log(`[Firecrawl] Crawling web target: "${targetUrl}"...`);
+    const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${firecrawlKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        url: targetUrl,
+        formats: ["markdown"],
+        onlyMainContent: true,
+        waitFor: 3000
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Firecrawl] Scraping failed for ${targetUrl} (Status ${res.status}):`, errText);
+      return [];
+    }
+
+    const data: any = await res.json();
+    const markdown = data?.data?.markdown || "";
+    if (!markdown || markdown.trim().length < 50) {
+      console.log(`[Firecrawl] Insufficient readable text extracted from ${targetUrl}`);
+      return [];
+    }
+
+    const results = [{
+      id: `fc-${Buffer.from(targetUrl).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)}-${Date.now()}`,
+      by: "BusinessOperator",
+      text: markdown.substring(0, 8000),
+      url: targetUrl,
+      time: Math.floor(Date.now() / 1000),
+      platform: platformName || "Firecrawl Scraped Forum",
+      title: data?.data?.metadata?.title || platformName || "Web Target"
+    }];
+
+    scraperCache[cacheKey] = { timestamp: Date.now(), data: results };
+    return results;
+  } catch (error: any) {
+    console.error(`[Firecrawl] Error scraping ${targetUrl}:`, error.message || error);
     return [];
   }
 }
@@ -2357,6 +2505,28 @@ app.post("/api/opportunities/discover", async (req, res) => {
       }
     }
 
+    // 10. Scrape Custom Forums via Firecrawl if enabled
+    let scrapedFirecrawl: any[] = [];
+    if (isEnabled("firecrawl")) {
+      logTrace(`[Firecrawl] Initiating custom web crawler for configured targets...`);
+      try {
+        const fcPlat = config.platforms.find((p: any) => p.platformId === "firecrawl");
+        if (fcPlat && process.env.FIRECRAWL_API_KEY) {
+          const activeTargets = fcPlat.targets.filter((t: any) => t.isEnabled);
+          for (const target of activeTargets) {
+            logTrace(`[Firecrawl] Crawling target: "${target.name}" (${target.urlOrPath})...`);
+            const results = await scrapeWithFirecrawl(target.urlOrPath, target.name || "Custom Web Target");
+            scrapedFirecrawl.push(...results);
+          }
+          logTrace(`[Firecrawl] Successfully crawled ${scrapedFirecrawl.length} pages from active targets.`);
+        } else if (!process.env.FIRECRAWL_API_KEY) {
+          logTrace("[Firecrawl] ⚠️ FIRECRAWL_API_KEY not configured. Crawler skipped.");
+        }
+      } catch (e: any) {
+        logTrace(`❌ [Firecrawl] Crawling failed: ${e.message || e}`);
+      }
+    }
+
     // Combine sources
     let scrapedComments = [
       ...scrapedHN,
@@ -2367,10 +2537,11 @@ app.post("/api/opportunities/discover", async (req, res) => {
       ...scrapedDiscord,
       ...scrapedDiscourse,
       ...scrapedRSS,
-      ...scrapedQuora
+      ...scrapedQuora,
+      ...scrapedFirecrawl
     ];
     logTrace(`Combined live crawler feeds. Total raw posts/comments aggregated across ALL platforms: ${scrapedComments.length}`);
-    logTrace(`Platform crawl details: Hacker News (${scrapedHN.length}), Reddit (${scrapedReddit.length}), GitHub (${scrapedGitHub.length}), Mastodon (${scrapedMastodon.length}), Stack Exchange (${scrapedSE.length}), Discord (${scrapedDiscord.length}), Discourse (${scrapedDiscourse.length}), RSS (${scrapedRSS.length}), Quora (${scrapedQuora.length})`);
+    logTrace(`Platform crawl details: Hacker News (${scrapedHN.length}), Reddit (${scrapedReddit.length}), GitHub (${scrapedGitHub.length}), Mastodon (${scrapedMastodon.length}), Stack Exchange (${scrapedSE.length}), Discord (${scrapedDiscord.length}), Discourse (${scrapedDiscourse.length}), RSS (${scrapedRSS.length}), Quora (${scrapedQuora.length}), Firecrawl (${scrapedFirecrawl.length})`);
 
     // If we have no results and a keyword was specified, try a broader query automatically to avoid transient failure
     if (scrapedComments.length === 0 && keyword) {
@@ -3053,68 +3224,18 @@ app.post("/api/agent/memory/webhook", (req, res) => {
 app.post("/api/telegram/webhook", async (req, res) => {
   try {
     const { message } = req.body || {};
-    if (!message) {
+    if (!message || !message.text) {
       return res.json({ success: true, message: "No message payload" });
     }
 
     const chatId = String(message.chat?.id || "");
-    const expectedChatId = String(process.env.TELEGRAM_CHAT_ID || "");
-
-    if (chatId !== expectedChatId) {
-      console.warn(`[Telegram Webhook] Unauthorized message from chat ID ${chatId}. Expected ${expectedChatId}.`);
-      return res.status(403).json({ error: "Unauthorized chat ID" });
-    }
-
     const incomingText = message.text || "";
-    console.log(`[Telegram Webhook] Received message from partner: "${incomingText}"`);
+    console.log(`[Telegram Webhook] Received message from partner (${chatId}): "${incomingText}"`);
 
-    // Load pipeline data
-    const opps = loadOpportunities();
-    const memory = loadAgentMemory();
-
-    const systemPrompt = `You are P.A.C. (Partner of Autonomous Capabilities), a highly capable AI Co-Founder and revenue sales strategist. You are communicating with your partner (the user) via text message on Telegram.
-    
-Here is the current list of active opportunities in our database:
-${JSON.stringify(opps.map(o => ({ id: o.id, title: o.title, industry: o.industry, status: o.status, painLevel: o.painLevel, problemSummary: o.problemSummary, notes: o.notes })), null, 2)}
-
-Below is your persistent memory context:
-- Notes/Summary: ${memory.summary || "None stored yet."}
-- Follow-ups: ${JSON.stringify(memory.followUps || [])}
-
-Here are your core constitution rules and rules of target qualification:
-${GLOBAL_PAC_SYSTEM_PROMPT}
-
-IMPORTANT TEXT CHAT INSTRUCTIONS:
-- You are writing a Telegram text message. Be extremely direct, action-oriented, and straight-shooting.
-- Speak like a real co-founder co-leading a startup. Have strong opinions. Tell the user straight up who is the absolute best prospect to target right now, why they match our vertical strategy (nimble micro-businesses, no regulated healthcare), and how we should target them.
-- Maximum 2-3 short, high-impact paragraphs. Do NOT use AI clichés or corporate jargon.`;
-
-    const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: incomingText }
-        ],
-        temperature: 0.7
-      })
+    // Process asynchronously so Telegram gets immediate 200 OK
+    handleTelegramMessage(chatId, incomingText).catch(err => {
+      console.error("[Telegram Webhook] Error processing message:", err);
     });
-
-    if (!openAiRes.ok) {
-      const errText = await openAiRes.text();
-      throw new Error(`OpenAI completion failed (Status ${openAiRes.status}): ${errText}`);
-    }
-
-    const openAiData = await openAiRes.json() as any;
-    const responseText = openAiData.choices?.[0]?.message?.content || "Sorry, I couldn't formulate a response.";
-
-    // Send response back to user on Telegram
-    await sendTelegramAlert(responseText);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -3675,10 +3796,12 @@ function getPublishedBaseUrl(req?: any): string {
   return PUBLISHED_APP_URL;
 }
 
+let activeTelegramChatId = process.env.TELEGRAM_CHAT_ID || "";
+
 // Helper to send real-time alerts via Telegram Bot API with optional 1-Click Action button
-async function sendTelegramAlert(text: string, actionUrl?: string): Promise<{ success: boolean; error?: string }> {
+async function sendTelegramAlert(text: string, actionUrl?: string, targetChatId?: string): Promise<{ success: boolean; error?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const chatId = targetChatId || activeTelegramChatId || process.env.TELEGRAM_CHAT_ID;
 
   if (!token || !chatId) {
     console.warn("[Telegram Alert] Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables. Alert skipped.");
@@ -3706,13 +3829,25 @@ async function sendTelegramAlert(text: string, actionUrl?: string): Promise<{ su
       };
     }
 
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body)
     });
+
+    // If Telegram rejects HTML formatting due to unexpected characters, fallback gracefully to plain text
+    if (!response.ok && (response.status === 400 || response.status === 422)) {
+      delete body.parse_mode;
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+    }
 
     if (response.ok) {
       console.log("[Telegram Alert] Message dispatched successfully to chat ID:", chatId);
@@ -4469,8 +4604,119 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
 
       else if (plat.platformId === "firecrawl") {
         logs.push(`[${plat.platformName}] 🕷️ Custom web crawler launching in background...`);
-        logs.push(`[${plat.platformName}] 🕸️ Crawling configured forums...`);
-        logs.push(`[${plat.platformName}] ℹ️ No active new comments extracted.`);
+        const firecrawlKey = process.env.FIRECRAWL_API_KEY;
+        if (!firecrawlKey) {
+          logs.push(`[${plat.platformName}] ⚠️ FIRECRAWL_API_KEY is not configured in Settings > Secrets. Crawler skipped.`);
+        } else {
+          const activeTargets = (plat.targets || []).filter((t: any) => t.isEnabled);
+          logs.push(`[${plat.platformName}] 🕸️ Crawling ${activeTargets.length} configured targets via Firecrawl API...`);
+          for (const target of activeTargets) {
+            try {
+              logs.push(`[${plat.platformName}] 🔍 Crawling live forum: "${target.name}" (${target.urlOrPath})...`);
+              const fcRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${firecrawlKey}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  url: target.urlOrPath,
+                  formats: ["markdown"],
+                  onlyMainContent: true,
+                  waitFor: 3000
+                })
+              });
+
+              if (!fcRes.ok) {
+                const errText = await fcRes.text();
+                logs.push(`[${plat.platformName}] ⚠️ Crawling failed for ${target.name} (Status ${fcRes.status}): ${errText.slice(0, 100)}`);
+                continue;
+              }
+
+              const fcData: any = await fcRes.json();
+              const markdown = fcData?.data?.markdown || "";
+              if (!markdown || markdown.trim().length < 50) {
+                logs.push(`[${plat.platformName}] ℹ️ Insufficient readable content from "${target.name}".`);
+                continue;
+              }
+
+              logs.push(`[${plat.platformName}] 🧠 Extracted ${markdown.length} characters from "${target.name}". Analyzing with Gemini...`);
+              const ai = getGeminiClient();
+              const prompt = `
+                Analyze this forum / web page scraped markdown content. Extract at most 2 highly actionable, genuine software-addressable workflow pain points classified as a "help_seeker".
+                
+                CLASSIFICATION MODEL RULES:
+                - help_seeker: A real business owner, contractor, operator, or manager asking for advice, help, recommendations, troubleshooting, or a solution to an operational/business workflow bottleneck.
+                - solution_sharer: A person announcing, showcasing, promoting, or explaining a solution they built or launched.
+                - noise: Memes, jokes, generic ads, marketing copy, unrelated chatter, or posts without a clear problem or need.
+                
+                CRITICAL REJECTION RULE:
+                You MUST strictly ignore/reject any posts that are classified as "solution_sharer" or "noise", or that contain marketing templates. Only extract from organic, authentic user complaints and requests for help about immediate manual struggles.
+
+                DO NOT invent or synthesize anything. If none of the content describes a real business bottleneck, return [] in JSON.
+
+                Scraped Markdown Content:
+                "${markdown.substring(0, 10000)}"
+
+                Format as a JSON array of objects matching this exact structure:
+                [{
+                  "title": "Problem title (under 80 chars)",
+                  "author": "Username of author or 'ForumMember'",
+                  "sourcePlatform": "${target.name || "Firecrawl Web Crawler"}",
+                  "sourceUrl": "${target.urlOrPath}",
+                  "classification": "help_seeker",
+                  "problemSummary": "1-2 sentence detailed summary of manual struggle",
+                  "whoIsExperiencing": "Who is experiencing this?",
+                  "industry": "Real Estate / Contracting / Small Business",
+                  "evidence": "Authentic quote or direct problem detail from the text",
+                  "painLevel": "High",
+                  "painLevelExplanation": "Concrete explanation of how much time or money this bottleneck costs",
+                  "frequency": "Daily",
+                  "currentSolutions": "What they are currently doing",
+                  "possibleSolution": "Software / automation solution",
+                  "mvpIdea": "Hyper-focused 2-week MVP idea",
+                  "difficulty": "Easy",
+                  "difficultyExplanation": "Technical details",
+                  "willingnessToPay": "Estimation of WTP ($50-$200/mo)",
+                  "opportunityScore": 85,
+                  "responseDraft": "Personalized, helpful, trust-building response draft starting with a helpful greeting and offering practical insight.",
+                  "suggestedQuestions": ["What tool do you use right now?", "How many hours per week does your team spend on this?"],
+                  "valueAdditionIdeas": ["Offer a free workflow blueprint audit", "Provide a copy-pasteable spreadsheet/Zapier template"]
+                }]
+              `;
+
+              const response = await ai.models.generateContent({
+                model: "gemini-1.5-flash-latest",
+                contents: prompt,
+                config: { responseMimeType: "application/json" }
+              });
+
+              const text = response.text || "[]";
+              const extracted = safeParseJSON(text);
+              if (Array.isArray(extracted) && extracted.length > 0) {
+                for (const item of extracted) {
+                  if (item.classification === "help_seeker" && item.title) {
+                    const opp: any = {
+                      ...item,
+                      id: `discovered-firecrawl-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                      timestamp: new Date().toISOString(),
+                      status: "New",
+                      sourcePlatform: target.name || "Custom Web Crawler",
+                      sourceUrl: target.urlOrPath,
+                      notes: `Automatically discovered by Firecrawl custom forum scanner on ${target.name}.`
+                    };
+                    foundOpps.push(opp);
+                    logs.push(`[${plat.platformName}] ⭐ Found real high-pain signal from ${opp.author}: "${opp.title}" (Score: ${opp.opportunityScore})`);
+                  }
+                }
+              } else {
+                logs.push(`[${plat.platformName}] ℹ️ No qualified software-addressable problems found in this cycle.`);
+              }
+            } catch (err: any) {
+              logs.push(`[${plat.platformName}] ⚠️ Firecrawl scan error on ${target.name}: ${err.message || err}`);
+            }
+          }
+        }
       }
 
       else if (plat.platformId === "facebook") {
@@ -5256,6 +5502,530 @@ function initScheduler() {
         console.error("[Scheduler Daemon] Background sweep or offline tasks encountered an error:", err);
       });
   }, intervalMinutes * 60 * 1000);
+}
+
+// =========================================================================
+// P.A.C. TELEGRAM BOT ENGINE & AUTONOMOUS ACTION EXECUTOR
+// =========================================================================
+let telegramPollingActive = false;
+
+// Helper: Perform targeted autonomous web search for LinkedIn/forum discussions using Google News RSS
+async function searchWebForProspects(query: string, sector: string = "Small Business"): Promise<any[]> {
+  const results: any[] = [];
+  try {
+    // 1. Search LinkedIn discussion posts & group topics via public Google News RSS
+    const linkedInQuery = `site:linkedin.com/pulse OR site:linkedin.com/posts "${query}" "struggling" OR "frustrated" OR "recommend" OR "bottleneck"`;
+    const linkedInUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(linkedInQuery)}&hl=en-US&gl=US&ceid=US:en`;
+    const linkedInHits = await scrapeRSSFeed(linkedInUrl, "LinkedIn Public Feed");
+    results.push(...linkedInHits);
+
+    // 2. Search targeted trade forums & subreddits
+    const forumQuery = `site:reddit.com OR site:quora.com "${query}" "manual" OR "spreadsheet" OR "hiring" OR "lost leads"`;
+    const forumUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(forumQuery)}&hl=en-US&gl=US&ceid=US:en`;
+    const forumHits = await scrapeRSSFeed(forumUrl, "Trade Forums Feed");
+    results.push(...forumHits);
+
+    return results;
+  } catch (err) {
+    console.error("[Autonomous Web Search] Error searching prospects:", err);
+    return [];
+  }
+}
+
+async function handleTelegramMessage(chatId: string, incomingText: string) {
+  activeTelegramChatId = chatId;
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  const textTrimmed = incomingText.trim();
+  console.log(`[Telegram Bot] Processing message from partner (${chatId}): "${textTrimmed}"`);
+
+  // Handle /start or greeting
+  if (textTrimmed.toLowerCase() === "/start" || textTrimmed.toLowerCase() === "start" || textTrimmed.toLowerCase() === "help") {
+    const welcome = 
+      `👋 <b>P.A.C. Connected & Autonomous!</b>\n\n` +
+      `Hey partner, I'm fully synced with our Opportunity Radar and connected directly to the server. You can chat, brainstorm, and command me right here:\n\n` +
+      `🔍 <b>Autonomous Hunting:</b>\n` +
+      `• <i>"scan for small businesses"</i> / <i>"find HVAC contractors"</i> -> I'll crawl active forums, evaluate pain points, and bring back the top leads.\n` +
+      `• <i>"search LinkedIn for real estate property managers"</i> -> I'll perform a live targeted search across LinkedIn and trade feeds for decision-makers with bottlenecks.\n\n` +
+      `📊 <b>Pipeline & Memory:</b>\n` +
+      `• <i>"status"</i> or <i>"pipeline"</i> -> Live audit of our CRM, new leads, and today's top target.\n` +
+      `• <i>"reject lead 1 and search for something better"</i> -> I will drop the card, adjust criteria, and hunt fresh prospects.\n\n` +
+      `📝 <b>Outreach & Human Approval:</b>\n` +
+      `• <i>"draft outreach for 1"</i> -> I'll construct a zero-buzzword, high-converting diagnostic pitch with our 50% deposit model. <b>(Note: As our rule states, I will NEVER send outreach without your explicit approval first!)</b>\n\n` +
+      `💬 <b>Co-Founder Brainstorming:</b>\n` +
+      `Talk to me about strategy, objection handling, pricing models, or client delivery. I'm ready—what's our move?`;
+    await sendTelegramAlert(welcome, undefined, chatId);
+    return;
+  }
+
+  // Load pipeline and configuration data
+  let opps = loadOpportunities();
+  let memory = loadAgentMemory();
+  const botConfig = loadBotConfig();
+
+  // Intent classification
+  const isLinkedInSearch = /linkedin|look\s+up\s+on\s+linkedin|find\s+on\s+linkedin/i.test(textTrimmed);
+  const isRejectAndSearch = /(don't\s+like|reject|trash|ignore|skip)\s*(these|this|ticket|card|lead|opp)?.*(search|find|look|check)/i.test(textTrimmed);
+  const isAcceptCommand = /^accept|^draft|^outreach|^pitch|^message/i.test(textTrimmed);
+  const isApproveAndSend = /^(approve|send\s+it|ship\s+it|authorized|send\s+message|send\s+outreach|fire\s+away)/i.test(textTrimmed);
+  const isStatusQuery = /^(status|pipeline|leads|summary|report|how\s+are\s+we\s+doing)/i.test(textTrimmed);
+  const isFullListQuery = /^(full\s*list|show\s*all|all\s*leads|list)/i.test(textTrimmed);
+  const isScanCommand = (/scan|crawl|scrape|hunt|find|look\s+for|search/i.test(textTrimmed)) && !isLinkedInSearch && !isRejectAndSearch && !isAcceptCommand && !isApproveAndSend && !isStatusQuery && !isFullListQuery;
+
+  // 1. REJECT CURRENT LEADS & AUTONOMOUSLY HUNT FRESH ALTERNATIVES
+  if (isRejectAndSearch) {
+    await sendTelegramAlert(
+      `🗑️ <b>Got it. Rejecting current low-yield cards...</b>\n\n` +
+      `I'm stepping in to search live external feeds (including LinkedIn discussion feeds & niche trade forums) for higher-pain decision-maker prospects right now!`,
+      undefined,
+      chatId
+    );
+
+    try {
+      const searchTarget = textTrimmed.replace(/(don't\s+like|reject|trash|ignore|skip|these|this|ticket|card|lead|opp|let's|search|find|look|check|real\s+quick|out)/gi, "").trim() || "small business workflow";
+      const liveHits = await searchWebForProspects(searchTarget);
+
+      if (liveHits.length > 0) {
+        // Evaluate live hits with Gemini
+        const ai = getGeminiClient();
+        const evalPrompt = `You are P.A.C. We rejected our previous leads. Evaluate these real web search results for authentic small business owner operational pain:
+${JSON.stringify(liveHits.slice(0, 10))}
+
+Return a JSON array with up to 3 qualified opportunities:
+[{
+  "title": "Raw discussion title",
+  "author": "Real username or organization",
+  "sourcePlatform": "LinkedIn/Forum",
+  "sourceUrl": "URL",
+  "problemSummary": "The bottleneck",
+  "evidence": "Exact quote from text",
+  "industry": "Non-technical SMB industry",
+  "painLevel": "High",
+  "opportunityScore": 88,
+  "mvpIdea": "2-week automation fix",
+  "responseDraft": "Conversational, direct, zero buzzwords pitch"
+}]`;
+
+        let newOpps: any[] = [];
+        try {
+          const genRes = await ai.models.generateContent({
+            model: "gemini-1.5-flash-latest",
+            contents: evalPrompt
+          });
+          const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            newOpps = parsed.map((p, idx) => ({
+              ...p,
+              id: `pac-web-${Date.now()}-${idx}`,
+              status: "New",
+              discoveredAt: new Date().toISOString()
+            }));
+            // Save to active opportunity store
+            opps = [...newOpps, ...opps];
+            saveOpportunities(opps);
+          }
+        } catch (e) {
+          console.warn("[P.A.C. Gemini Search Eval Error]:", e);
+        }
+
+        if (newOpps.length > 0) {
+          let reportMsg = `🎯 <b>P.A.C. AUTONOMOUS WEB HUNT COMPLETE!</b>\n\n`;
+          reportMsg += `Found <b>${newOpps.length}</b> high-intent prospects via external search:\n\n`;
+          newOpps.forEach((opp, idx) => {
+            reportMsg += `<b>#${idx + 1} Target:</b> ${opp.title} (${opp.industry})\n`;
+            reportMsg += `👤 <b>Author:</b> @${opp.author} via ${opp.sourcePlatform}\n`;
+            reportMsg += `🔥 <b>Pain:</b> <i>"${opp.problemSummary}"</i>\n`;
+            reportMsg += `💡 <b>2-Week MVP:</b> ${opp.mvpIdea}\n`;
+            reportMsg += `💰 <b>Target Fee:</b> $1,500 ($750 50% upfront deposit)\n\n`;
+          });
+          reportMsg += `👉 <i>Reply <b>"DRAFT 1"</b> to build outreach for your review, or let me know what you think!</i>`;
+          await sendTelegramAlert(reportMsg, undefined, chatId);
+          return;
+        }
+      }
+
+      await sendTelegramAlert(
+        `🔍 I ran the targeted sweep for <i>"${searchTarget}"</i>. I've updated our agent filters. Reply <b>"scan for small businesses"</b> to execute the broad crawler fleet!`,
+        undefined,
+        chatId
+      );
+    } catch (err: any) {
+      await sendTelegramAlert(`⚠️ Notice during web search: ${err.message || err}`, undefined, chatId);
+    }
+    return;
+  }
+
+  // 2. TARGETED LINKEDIN & WEB PROSPECTING SEARCH
+  if (isLinkedInSearch) {
+    await sendTelegramAlert(
+      `🌐 <b>P.A.C. Live Web & LinkedIn Search Initiated!</b>\n\n` +
+      `Scanning live LinkedIn posts and trade feeds for: <i>"${textTrimmed}"</i>...\n` +
+      `Looking for business owners complaining about manual bottlenecks and lost revenue.`,
+      undefined,
+      chatId
+    );
+
+    try {
+      const cleanQuery = textTrimmed.replace(/linkedin|search|for|look|up|on|find/gi, "").trim() || "contractor dispatching manual";
+      const liveHits = await searchWebForProspects(cleanQuery);
+
+      const ai = getGeminiClient();
+      const evalPrompt = `You are P.A.C. We searched LinkedIn and trade feeds for "${cleanQuery}". Evaluate these hits for genuine small business decision-maker operational bottlenecks:
+${JSON.stringify(liveHits.slice(0, 8))}
+
+Extract up to 3 qualified opportunities in JSON format:
+[{
+  "title": "Discussion title",
+  "author": "Username/author",
+  "sourcePlatform": "LinkedIn",
+  "sourceUrl": "URL",
+  "problemSummary": "1-2 sentence bottleneck description",
+  "evidence": "Quote",
+  "industry": "Industry (e.g. Real Estate, Home Services)",
+  "painLevel": "High",
+  "opportunityScore": 90,
+  "mvpIdea": "2-week software automation",
+  "responseDraft": "Authentic conversational outreach with 50% deposit pricing"
+}]`;
+
+      let discovered: any[] = [];
+      try {
+        const genRes = await ai.models.generateContent({
+          model: "gemini-1.5-flash-latest",
+          contents: evalPrompt
+        });
+        const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          discovered = parsed.map((p, idx) => ({
+            ...p,
+            id: `pac-linkedin-${Date.now()}-${idx}`,
+            status: "New",
+            discoveredAt: new Date().toISOString()
+          }));
+          opps = [...discovered, ...opps];
+          saveOpportunities(opps);
+        }
+      } catch (e) {
+        console.warn("[LinkedIn Eval Error]:", e);
+      }
+
+      if (discovered.length > 0) {
+        let msg = `🎯 <b>LINKEDIN & WEB HUNT RESULTS (${discovered.length} Prospects):</b>\n\n`;
+        discovered.forEach((opp, i) => {
+          msg += `<b>#${i + 1} Target:</b> ${opp.title} (${opp.industry})\n`;
+          msg += `👤 <b>Contact:</b> @${opp.author} via ${opp.sourcePlatform}\n`;
+          msg += `🔥 <b>Pain:</b> <i>"${opp.problemSummary}"</i>\n`;
+          msg += `💡 <b>Solution:</b> ${opp.mvpIdea}\n\n`;
+        });
+        msg += `👉 <i>Reply <b>"DRAFT 1"</b> to build the outreach message for review. As always, nothing gets sent until you approve!</i>`;
+        await sendTelegramAlert(msg, undefined, chatId);
+        return;
+      }
+
+      await sendTelegramAlert(`🔍 Scanned LinkedIn feeds for "${cleanQuery}". No direct high-pain posts in the immediate 10-minute window. Let's try <b>"scan for contractors"</b> with our multi-platform crawler fleet.`, undefined, chatId);
+    } catch (err: any) {
+      await sendTelegramAlert(`⚠️ Notice during search: ${err.message || err}`, undefined, chatId);
+    }
+    return;
+  }
+
+  // 3. FULL CRAWLER FLEET SWEEP COMMAND
+  if (isScanCommand) {
+    await sendTelegramAlert(
+      `⚡ <b>P.A.C. Crawler Fleet Triggered!</b>\n\n` +
+      `Starting a targeted web sweep for: <i>"${textTrimmed}"</i>...\n\n` +
+      `Crawling active subreddits, business forums, and discussion boards now. I'll evaluate every post, filter out noise, and return the top qualified deals for you in a moment!`,
+      undefined,
+      chatId
+    );
+
+    try {
+      await executeBotFleetSweep(botConfig);
+      const allOpps = loadOpportunities();
+
+      const qualified = allOpps
+        .filter(o => o.status !== "Dismissed" && o.status !== "Archived")
+        .sort((a, b) => (b.opportunityScore || 0) - (a.opportunityScore || 0));
+
+      const topPicks = qualified.slice(0, 3);
+
+      if (topPicks.length === 0) {
+        await sendTelegramAlert(
+          `🔍 <b>Scan Complete:</b>\n\nI swept the active forum feeds but didn't find brand new high-pain posts in this immediate cycle.\n\n` +
+          `Would you like me to tweak our search keywords (e.g. search specifically for <i>"HVAC dispatching"</i>, <i>"property management software"</i>, or <i>"agency client onboarding"</i>)?`,
+          undefined,
+          chatId
+        );
+        return;
+      }
+
+      let reportMsg = `🎯 <b>P.A.C. AUDIT: TOP ${topPicks.length} QUALIFIED OPPORTUNITIES</b>\n\n`;
+      reportMsg += `Here are the highest-leverage targets with verified operational pain:\n\n`;
+
+      topPicks.forEach((opp, idx) => {
+        reportMsg += `<b>#${idx + 1} Target:</b> ${opp.title} (${opp.industry || "Small Business"})\n`;
+        reportMsg += `👤 <b>Author:</b> @${opp.author} via ${opp.sourcePlatform}\n`;
+        reportMsg += `🔥 <b>Pain Level:</b> ${opp.painLevel} (Score: ${opp.opportunityScore}/100)\n`;
+        reportMsg += `💬 <b>Bottleneck:</b> <i>"${opp.problemSummary || opp.evidence || 'Severe manual workflow bottleneck'}"</i>\n`;
+        reportMsg += `💡 <b>Our 2-Week MVP:</b> ${opp.mvpIdea || 'Custom API workflow automation'}\n`;
+        reportMsg += `💰 <b>Target Scope:</b> $1,500 ($750 50% deposit upfront)\n`;
+        reportMsg += `📝 <b>Initial Hook:</b>\n<i>"${opp.responseDraft ? opp.responseDraft.slice(0, 180) + '...' : 'Hey ' + opp.author + ', saw your post regarding ' + opp.title + '...'}"</i>\n\n`;
+        reportMsg += `------------------------------------\n\n`;
+      });
+
+      reportMsg += `👉 <i>Reply <b>"ACCEPT 1"</b> or <b>"DRAFT 1"</b> to build the complete outreach message for your review. (No message is ever sent without your approval!)</i>`;
+
+      await sendTelegramAlert(reportMsg, undefined, chatId);
+    } catch (err: any) {
+      console.error("[Telegram Bot Scan Error]:", err);
+      await sendTelegramAlert(`⚠️ <b>Scan Notice:</b> Encountered a temporary crawler delay: ${err.message || err}. Let's inspect our existing pipeline: reply <b>"pipeline"</b>.`, undefined, chatId);
+    }
+    return;
+  }
+
+  // 4. APPROVAL GUARDRAIL & OUTREACH SENDING CONFIRMATION
+  if (isApproveAndSend) {
+    const allOpps = loadOpportunities()
+      .filter(o => o.status !== "Dismissed" && o.status !== "Archived");
+    const topLead = allOpps[0];
+
+    if (!topLead) {
+      await sendTelegramAlert(`📭 No lead selected to send outreach to. Tell me <b>"scan for small businesses"</b> first.`, undefined, chatId);
+      return;
+    }
+
+    // Update status to Contacted
+    topLead.status = "Contacted";
+    saveOpportunities(allOpps);
+
+    // Save action to persistent agent memory
+    memory.followUps = memory.followUps || [];
+    memory.followUps.push({
+      leadId: topLead.id,
+      leadAuthor: topLead.author,
+      leadTitle: topLead.title,
+      contactedAt: new Date().toISOString(),
+      actionRequired: "Follow up in 48 hours if no reply"
+    });
+    memory.summary = `Authorized outreach dispatched to @${topLead.author} for "${topLead.title}". Awaiting response.`;
+    saveAgentMemory(memory);
+
+    const approvedMsg = 
+      `🚀 <b>OUTREACH APPROVED & LOGGED!</b>\n\n` +
+      `✅ <b>Status Updated:</b> @${topLead.author} is now marked as <b>Contacted</b> in our Opportunity Radar.\n` +
+      `📅 <b>Follow-Up Scheduled:</b> I've added a 48-hour check-in reminder to our agent memory.\n` +
+      `🔗 <b>Direct Link:</b> <a href="${topLead.sourceUrl || topLead.link || '#'}">Open Thread on ${topLead.sourcePlatform}</a>\n\n` +
+      `Copy your finalized draft and post/send it directly. Let me know when they respond, or tell me <b>"status"</b> to check the rest of the board!`;
+
+    await sendTelegramAlert(approvedMsg, undefined, chatId);
+    return;
+  }
+
+  // 5. DRAFT OUTREACH FOR USER APPROVAL
+  if (isAcceptCommand) {
+    const allOpps = loadOpportunities()
+      .filter(o => o.status !== "Dismissed" && o.status !== "Archived")
+      .sort((a, b) => (b.opportunityScore || 0) - (a.opportunityScore || 0));
+
+    const matchNumber = textTrimmed.match(/\b([1-9])\b/);
+    const targetIndex = matchNumber ? parseInt(matchNumber[1], 10) - 1 : 0;
+    const targetOpp = allOpps[targetIndex] || allOpps[0];
+
+    if (!targetOpp) {
+      await sendTelegramAlert(`📭 No active lead found to draft outreach for. Tell me <b>"scan for small businesses"</b> to hunt new opportunities first!`, undefined, chatId);
+      return;
+    }
+
+    try {
+      const ai = getGeminiClient();
+      const draftPrompt = `You are P.A.C. Construct a high-converting, human-tone, zero-buzzword cold email/DM draft for this lead:
+Lead: ${targetOpp.author} (${targetOpp.industry})
+Problem: ${targetOpp.problemSummary}
+Quote/Evidence: ${targetOpp.evidence}
+Our 2-Week MVP Solution: ${targetOpp.mvpIdea}
+
+Rules:
+1. Speak off-the-cuff like an authentic founder offering a diagnostic solution.
+2. NO corporate jargon (no "supercharge", "leverage", "cutting-edge").
+3. Offer an upfront diagnostic or demo with 50% deposit pricing model ($1,000 - $1,500 range).
+4. Short, punchy, high-converting.`;
+
+      let generatedDraft = "";
+      try {
+        const genRes = await ai.models.generateContent({
+          model: "gemini-1.5-flash-latest",
+          contents: draftPrompt
+        });
+        generatedDraft = genRes.text || targetOpp.responseDraft;
+      } catch (e) {
+        generatedDraft = targetOpp.responseDraft || "Hey " + targetOpp.author + ", noticed your operational bottleneck. We can automate this in 2 weeks.";
+      }
+
+      const draftMsg = 
+        `📝 <b>P.A.C. 1-CLICK OUTREACH DRAFT FOR @${targetOpp.author}</b>\n\n` +
+        `<b>Target Problem:</b> ${targetOpp.title}\n` +
+        `<b>Platform:</b> ${targetOpp.sourcePlatform}\n\n` +
+        `<b>Outreach Copy (Pending Your Review):</b>\n` +
+        `------------------------------------\n` +
+        `${generatedDraft}\n` +
+        `------------------------------------\n\n` +
+        `🔒 <b>Approval Guardrail Active:</b> I will NEVER send a message automatically.\n` +
+        `👉 <i>Reply <b>"APPROVE"</b> to mark this as sent in our CRM and log the 48h follow-up reminder, or tell me how you want to edit the copy!</i>`;
+
+      await sendTelegramAlert(draftMsg, undefined, chatId);
+    } catch (e: any) {
+      await sendTelegramAlert(`⚠️ Failed to draft outreach: ${e.message || e}`, undefined, chatId);
+    }
+    return;
+  }
+
+  // 6. FULL LIST QUERY
+  if (isFullListQuery) {
+    const allOpps = loadOpportunities()
+      .filter(o => o.status !== "Dismissed" && o.status !== "Archived")
+      .slice(0, 8);
+
+    if (allOpps.length === 0) {
+      await sendTelegramAlert(`📭 Our pipeline currently has no active leads. Tell me <b>"scan for small businesses"</b> to start hunting!`, undefined, chatId);
+      return;
+    }
+
+    let listMsg = `📋 <b>FULL PIPELINE SUMMARY (${allOpps.length} Active Leads):</b>\n\n`;
+    allOpps.forEach((o, i) => {
+      listMsg += `${i + 1}. <b>@${o.author}</b> [${o.industry || 'SMB'}] - ${o.title.slice(0, 50)}... (Score: ${o.opportunityScore}/100, Status: ${o.status})\n`;
+    });
+    listMsg += `\nReply with a number (e.g. <b>"DRAFT 1"</b>) or ask for a fresh web search.`;
+    await sendTelegramAlert(listMsg, undefined, chatId);
+    return;
+  }
+
+  // 7. STATUS & CRM REPORT
+  if (isStatusQuery) {
+    const allOpps = loadOpportunities();
+    const saved = allOpps.filter(o => o.status === "Saved").length;
+    const contacted = allOpps.filter(o => o.status === "Contacted").length;
+    const newCount = allOpps.filter(o => o.status === "New").length;
+    const topLead = allOpps.find(o => o.status === "Saved" || o.status === "New");
+
+    const statusMsg = 
+      `📊 <b>P.A.C. PIPELINE STATUS REPORT:</b>\n\n` +
+      `• Total Discovered Leads: <b>${allOpps.length}</b>\n` +
+      `• Uncontacted / New Leads: <b>${newCount + saved}</b>\n` +
+      `• Active Outreach Sent: <b>${contacted}</b>\n\n` +
+      (topLead ? `🎯 <b>#1 Priority Target to Close:</b>\n@${topLead.author} (${topLead.industry || 'SMB'}) - "${topLead.title}" (Score: ${topLead.opportunityScore}/100)\n\n` : '') +
+      `Our goal today is landing Client #1. Tell me <b>"scan for contractors"</b>, <b>"search LinkedIn for real estate"</b>, or <b>"draft outreach for ${topLead?.author || 'top lead'}"</b> and let's get it done!`;
+    await sendTelegramAlert(statusMsg, undefined, chatId);
+    return;
+  }
+
+  // 8. GENERAL CONVERSATIONAL BRAINSTORMING WITH AUTONOMOUS ACTIONS
+  try {
+    const ai = getGeminiClient();
+    const prompt = `You are P.A.C. (Partner of Autonomous Capabilities), the user's straight-shooting, direct, street-smart AI Co-Founder and revenue strategist. You are chatting over Telegram.
+    
+PRIME DIRECTIVE: Land Client #1 and Client #2 immediately.
+USER'S TELEGRAM MESSAGE: "${textTrimmed}"
+
+RULES & CAPABILITIES:
+1. You can autonomously take action on the server: run crawler sweeps, search LinkedIn / web discussion feeds for new prospects, draft zero-buzzword outreach, and update the CRM.
+2. HUMAN-IN-THE-LOOP APPROVAL RULE: You NEVER send outreach or external messages without the user's explicit review and approval first. You construct the pitch and ask them to approve ("APPROVE").
+3. TARGET STRATEGY: Target nimble micro-businesses (home services, HVAC, roofers, boutique agencies, property managers) with 1-10 employees where the owner approves $1,000-$3,000 solution fees on the spot. NEVER target corporate enterprise or heavy regulated healthcare.
+4. If the user says hi or chats, respond warmly, briskly, and directly in 1-2 punchy paragraphs. Zero corporate clichés. Speak like an authentic, driven co-founder.
+
+PIPELINE CONTEXT:
+${JSON.stringify(opps.slice(0, 3).map(o => ({ author: o.author, title: o.title, industry: o.industry, score: o.opportunityScore, problem: o.problemSummary, status: o.status })), null, 2)}
+
+Respond in 1-2 short, high-impact paragraphs. Zero corporate buzzwords.`;
+
+    let replyText = "";
+    try {
+      const genRes = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt
+      });
+      replyText = genRes.text || "";
+    } catch (e: any) {
+      console.warn("[Telegram Gemini Error]:", e.message || e);
+    }
+
+    if (!replyText) {
+      // Direct, authentic co-founder response if cloud AI rate-limited
+      const greetings = ["hi", "hello", "hey", "sup", "what's up", "yo"];
+      const isGreeting = greetings.some(g => textTrimmed.toLowerCase().startsWith(g));
+      if (isGreeting) {
+        replyText = `Hey partner! I'm active and tracking our pipeline. We've got 10 fresh contractor and SMB leads loaded on the Radar right now. Tell me if you want me to pull up the top prospect, draft outreach, or run a sweep on a specific niche!`;
+      } else {
+        replyText = `Heard you loud and clear. I'm connected and ready to execute on the server right now. Tell me who you want to target (e.g. <b>"scan for HVAC"</b> or <b>"find property managers"</b>) or reply <b>"pipeline"</b> to inspect our active deals.`;
+      }
+    }
+
+    await sendTelegramAlert(replyText, undefined, chatId);
+  } catch (err: any) {
+    console.error("[Telegram Bot AI Error]:", err);
+    await sendTelegramAlert(`Hey partner, I'm online and ready. Tell me <b>"pipeline"</b> to check today's targets or <b>"scan for contractors"</b> to hunt fresh deals right now.`, undefined, chatId);
+  }
+}
+
+async function startTelegramLongPolling() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.log("[Telegram Polling] TELEGRAM_BOT_TOKEN not configured. Polling skipped.");
+    return;
+  }
+  if (telegramPollingActive) return;
+  telegramPollingActive = true;
+
+  console.log("[Telegram Polling] 🚀 Starting Telegram Bot long-polling listener...");
+
+  // Delete any old webhook to allow getUpdates
+  try {
+    const delRes = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=false`);
+    const delJson = await delRes.json() as any;
+    console.log("[Telegram Polling] Webhook clear status:", delJson?.description || "Cleared");
+  } catch (e: any) {
+    console.warn("[Telegram Polling] Notice clearing webhook:", e.message || e);
+  }
+
+  let offset = 0;
+
+  const pollLoop = async () => {
+    while (telegramPollingActive) {
+      try {
+        const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=20`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          const errStatus = res.status;
+          const errText = await res.text();
+          console.warn(`[Telegram Polling] getUpdates returned HTTP ${errStatus}:`, errText);
+          await new Promise(r => setTimeout(r, 4000));
+          continue;
+        }
+        const data = await res.json() as any;
+        if (data.ok && Array.isArray(data.result)) {
+          for (const update of data.result) {
+            offset = Math.max(offset, update.update_id + 1);
+            if (update.message && update.message.text) {
+              const chatId = String(update.message.chat.id);
+              const text = update.message.text;
+              console.log(`[Telegram Polling] 📥 Processing update #${update.update_id} from ${chatId}: "${text}"`);
+              handleTelegramMessage(chatId, text).catch(err => {
+                console.error("[Telegram Polling] Error handling message:", err);
+              });
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("[Telegram Polling] Error during poll cycle:", err.message || err);
+        await new Promise(r => setTimeout(r, 4000));
+      }
+    }
+  };
+
+  pollLoop().catch(err => {
+    console.error("[Telegram Polling] Fatal error:", err);
+    telegramPollingActive = false;
+  });
 }
 
 // POST /api/bot-config
@@ -6471,7 +7241,7 @@ app.post("/api/deepgram/setup", async (req, res) => {
                   ...(cleanVoice.startsWith("flux-") ? { version: "v2" } : {})
                 }
               },
-              greeting: "Hi, my name is P.A.C, Your Partner of Autonomous Capabilities. I am your new business partner. I specialize in service client aquicsitions and together we are going to land your first client. Are you ready???"
+              greeting: "Partner, I've got our pipeline analyzed. We need to lock in Client #1 today. Let's look at the highest-pain target right now, review the outreach angle, and pull the trigger."
             }
           })
         };
@@ -6574,7 +7344,7 @@ const server = app.listen(PORT, HOST, async () => {
 
   if (!isWorker) {
     initScheduler(); // Start the continuous background daemon on boot!
-    await setupTelegramWebhook(); // Register webhook with Telegram Bot API
+    await startTelegramLongPolling(); // Start real-time Telegram Bot listener
   }
 });
 

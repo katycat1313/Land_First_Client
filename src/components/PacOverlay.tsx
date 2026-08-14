@@ -87,7 +87,7 @@ export default function PacOverlay({
     return [
       {
         role: "pac",
-        text: "Welcome back, partner. P.A.C. memory and core capabilities online. What is our primary revenue focus for today?",
+        text: "Partner, I'm online and auditing our pipeline. We have high-pain leads ready for outreach and we need to lock in Client #1 today. Let's look at the highest-leverage lead, review the angle, and get moving.",
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ];

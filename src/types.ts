@@ -98,3 +98,18 @@ export interface Stats {
   productIdeas: number;
   followupsPending: number;
 }
+
+export interface AwarenessCampaignPost {
+  id: string;
+  targetPlatform: 'Reddit' | 'LinkedIn' | 'Facebook' | 'Quora' | 'Discourse';
+  communityName: string;
+  communityUrl: string;
+  topicHook: string;
+  angle: string;
+  postTitle: string;
+  postBody: string;
+  callToAction: string;
+  landingPageUrl: string;
+  status: 'draft' | 'posted' | 'archived';
+  createdAt: string;
+}
