@@ -295,7 +295,8 @@ async function fetchWithRetry(url: string, options?: RequestInit): Promise<Respo
 // ==========================================
 let llmConfig = {
   baseUrl: process.env.OLLAMA_BASE_URL || "https://your-ollama-tunnel.trycloudflare.com",
-  crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.G14_TUNNEL_URL || "",
+  crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "",
+  g14TunnelUrl: process.env.G14_TUNNEL_URL || "",
   model: process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct-q4_k_m",
   provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini",
   useSlingshot: true
@@ -303,28 +304,56 @@ let llmConfig = {
 
 // Helper to fetch via G14 Slingshot residential proxy or direct fetch fallback
 async function fetchWithSlingshot(url: string, options?: RequestInit): Promise<Response> {
-  const tunnelUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  const macUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  const g14Url = (llmConfig.g14TunnelUrl || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
   
-  if (tunnelUrl && llmConfig.useSlingshot !== false) {
-    try {
-      const proxyUrl = `${tunnelUrl}/proxy?url=${encodeURIComponent(url)}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-      
-      const res = await fetch(proxyUrl, {
-        headers: options?.headers,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      
-      if (res.ok) {
-        return res;
+  if (llmConfig.useSlingshot !== false) {
+    // 1. Try Primary Mac Tunnel first
+    if (macUrl) {
+      try {
+        const proxyUrl = `${macUrl}/proxy?url=${encodeURIComponent(url)}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        
+        const res = await fetch(proxyUrl, {
+          headers: options?.headers,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          return res;
+        }
+        console.warn(`[G14 Slingshot] Mac tunnel returned HTTP ${res.status}. Trying fallback...`);
+      } catch (macErr: any) {
+        console.warn(`[G14 Slingshot] Mac tunnel unreachable (${macErr.message || macErr}). Trying fallback...`);
       }
-    } catch (tunnelErr: any) {
-      console.warn(`[G14 Slingshot] Residential tunnel relay missed (${tunnelErr.message}). Using resilient direct fetch.`);
+    }
+    
+    // 2. Try Secondary G14 Tunnel fallback
+    if (g14Url) {
+      try {
+        const proxyUrl = `${g14Url}/proxy?url=${encodeURIComponent(url)}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        
+        const res = await fetch(proxyUrl, {
+          headers: options?.headers,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (res.ok) {
+          return res;
+        }
+        console.warn(`[G14 Slingshot] G14 tunnel returned HTTP ${res.status}. Falling back to direct...`);
+      } catch (g14Err: any) {
+        console.warn(`[G14 Slingshot] G14 tunnel unreachable (${g14Err.message || g14Err}). Falling back to direct...`);
+      }
     }
   }
   
+  // 3. Direct fetch fallback
   return fetch(url, options);
 }
 
@@ -1038,6 +1067,7 @@ app.get("/api/llm/config", (req, res) => {
   res.json({
     baseUrl: llmConfig.baseUrl,
     crawlerTunnelUrl: llmConfig.crawlerTunnelUrl,
+    g14TunnelUrl: llmConfig.g14TunnelUrl,
     model: llmConfig.model,
     provider: llmConfig.provider,
     useSlingshot: llmConfig.useSlingshot,
@@ -1046,9 +1076,10 @@ app.get("/api/llm/config", (req, res) => {
 });
 
 app.post("/api/llm/config", (req, res) => {
-  const { baseUrl, crawlerTunnelUrl, model, provider, useSlingshot } = req.body || {};
+  const { baseUrl, crawlerTunnelUrl, g14TunnelUrl, model, provider, useSlingshot } = req.body || {};
   if (baseUrl !== undefined) llmConfig.baseUrl = String(baseUrl).trim();
   if (crawlerTunnelUrl !== undefined) llmConfig.crawlerTunnelUrl = String(crawlerTunnelUrl).trim();
+  if (g14TunnelUrl !== undefined) llmConfig.g14TunnelUrl = String(g14TunnelUrl).trim();
   if (model !== undefined) llmConfig.model = String(model).trim() || "qwen2.5";
   if (useSlingshot !== undefined) llmConfig.useSlingshot = Boolean(useSlingshot);
   if (provider && ["auto", "ollama", "gemini"].includes(provider)) {
@@ -1062,8 +1093,37 @@ app.post("/api/llm/config", (req, res) => {
 });
 
 app.get("/api/crawler/slingshot-status", async (req, res) => {
-  const targetUrl = (req.query?.url as string || llmConfig.crawlerTunnelUrl || llmConfig.baseUrl || process.env.CRAWLER_TUNNEL_URL || "").trim().replace(/\/$/, "");
-  if (!targetUrl) {
+  const queryUrl = req.query?.url as string;
+  
+  if (queryUrl) {
+    const targetUrl = queryUrl.trim().replace(/\/$/, "");
+    const startTime = Date.now();
+    try {
+      const healthRes = await fetchWithRetry(`${targetUrl}/health`, { method: "GET" });
+      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+      const data = await healthRes.json() as any;
+      const latencyMs = Date.now() - startTime;
+      return res.json({
+        configured: true,
+        online: true,
+        latencyMs,
+        details: data,
+        message: `⚡ Connected! Slingshot relay active (${latencyMs}ms latency).`
+      });
+    } catch (err: any) {
+      return res.json({
+        configured: true,
+        online: false,
+        error: err.message || err,
+        message: "Slingshot is offline or unreachable."
+      });
+    }
+  }
+
+  const macUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  const g14Url = (llmConfig.g14TunnelUrl || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
+
+  if (!macUrl && !g14Url) {
     return res.json({
       configured: false,
       online: false,
@@ -1071,29 +1131,61 @@ app.get("/api/crawler/slingshot-status", async (req, res) => {
     });
   }
 
-  const startTime = Date.now();
-  try {
-    const healthRes = await fetchWithRetry(`${targetUrl}/health`, { method: "GET" });
-    if (!healthRes.ok) {
-      throw new Error(`HTTP ${healthRes.status} from ${targetUrl}/health`);
+  let macResult: any = null;
+  let g14Result: any = null;
+
+  if (macUrl) {
+    const startTime = Date.now();
+    try {
+      const healthRes = await fetchWithRetry(`${macUrl}/health`, { method: "GET" });
+      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+      const data = await healthRes.json() as any;
+      macResult = {
+        online: true,
+        latencyMs: Date.now() - startTime,
+        details: data
+      };
+    } catch (err: any) {
+      macResult = {
+        online: false,
+        error: err.message || err
+      };
     }
-    const data = await healthRes.json() as any;
-    const latencyMs = Date.now() - startTime;
-    return res.json({
-      configured: true,
-      online: true,
-      latencyMs,
-      details: data,
-      message: `⚡ G14 Slingshot Connected! Residential IP relay active (${latencyMs}ms latency).`
-    });
-  } catch (err: any) {
-    return res.json({
-      configured: true,
-      online: false,
-      error: `Could not connect to G14 Slingshot at ${targetUrl}: ${err.message || err}. Ensure 'node g14-slingshot.js' and your tunnel are running on your G14.`,
-      message: "G14 Slingshot is currently offline or unreachable."
-    });
   }
+
+  if (g14Url) {
+    const startTime = Date.now();
+    try {
+      const healthRes = await fetchWithRetry(`${g14Url}/health`, { method: "GET" });
+      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+      const data = await healthRes.json() as any;
+      g14Result = {
+        online: true,
+        latencyMs: Date.now() - startTime,
+        details: data
+      };
+    } catch (err: any) {
+      g14Result = {
+        online: false,
+        error: err.message || err
+      };
+    }
+  }
+
+  const macOnline = macResult?.online;
+  const g14Online = g14Result?.online;
+
+  return res.json({
+    configured: true,
+    online: macOnline || g14Online || false,
+    mac: macResult,
+    g14: g14Result,
+    message: macOnline
+      ? `⚡ Connected! Primary Mac relay active (${macResult.latencyMs}ms latency).`
+      : g14Online
+        ? `⚡ Connected! Secondary G14 relay active (${g14Result.latencyMs}ms latency). Mac is offline.`
+        : `❌ All slingshot tunnels are offline or unreachable.`
+  });
 });
 
 app.post("/api/llm/status", async (req, res) => {
