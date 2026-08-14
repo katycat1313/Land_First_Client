@@ -459,7 +459,7 @@ async function generateUnifiedLLM({
 
   // Gemini Fallback
   const ai = getGeminiClient();
-  const geminiModels = ["gemini-3.5-flash", "gemini-3.5-flash"];
+  const geminiModels = ["gemini-3.6-flash", "gemini-3.6-flash"];
 
   let fullPromptText = prompt;
   if (systemPrompt) {
@@ -1326,7 +1326,7 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
 
     const prompt = `
       You are an elite opportunity analyzer for solo developers. You analyze raw forum comments, customer complaints, or business workflow descriptions and extract highly qualified product development signals.
@@ -1476,7 +1476,7 @@ async function generateSemanticQueries(targetSector: string, keyword: string): P
 
     console.log(`[Semantic Query Builder] Querying Gemini to generate organic, non-tech human queries for Sector: "${targetSector}", Keywords: "${keyword || 'None'}"...`);
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -2423,7 +2423,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
 
     logTrace("Initializing Gemini AI Client...");
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
 
     let semanticQueries: string[] = [];
     if (isLiteral) {
@@ -2984,7 +2984,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
     console.log(`Scraped ${markdown.length} characters. Analyzing with Gemini...`);
 
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
 
     const prompt = `
       You are an elite opportunity analyzer and text classifier for solo developers. You analyze raw web page content, forum threads, or customer grievances scraped from the web and extract highly qualified product development signals.
@@ -3393,7 +3393,7 @@ Return strictly valid JSON with key:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -3625,7 +3625,7 @@ Return strictly valid JSON with this structure:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -3721,7 +3721,7 @@ Return JSON:
 
         const aiClient = getGeminiClient();
         const response = await aiClient.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.6-flash",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -4426,7 +4426,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               `;
 
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: {
                   responseMimeType: "application/json"
@@ -4520,7 +4520,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-3.6-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -4598,7 +4598,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4679,7 +4679,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4794,7 +4794,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               `;
 
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4889,7 +4889,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -4968,7 +4968,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
                 }]
               `;
               const response = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-3.6-flash",
                 contents: prompt,
                 config: { responseMimeType: "application/json" }
               });
@@ -5058,7 +5058,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-3.6-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5145,7 +5145,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-3.6-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5236,7 +5236,7 @@ async function executeBotFleetSweep(config: any): Promise<{ logs: string[], foun
               }]
             `;
             const response = await ai.models.generateContent({
-              model: "gemini-3.5-flash",
+              model: "gemini-3.6-flash",
               contents: prompt,
               config: { responseMimeType: "application/json" }
             });
@@ -5470,7 +5470,7 @@ async function executeOfflineTasks() {
         `;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.6-flash",
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -5718,7 +5718,7 @@ Return a JSON array with up to 3 qualified opportunities:
         let newOpps: any[] = [];
         try {
           const genRes = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-3.6-flash",
             contents: evalPrompt
           });
           const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -5800,7 +5800,7 @@ Extract up to 3 qualified opportunities in JSON format:
       let discovered: any[] = [];
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.6-flash",
           contents: evalPrompt
         });
         const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -5962,7 +5962,7 @@ Rules:
       let generatedDraft = "";
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.6-flash",
           contents: draftPrompt
         });
         generatedDraft = genRes.text || targetOpp.responseDraft;
@@ -6049,7 +6049,7 @@ Respond in 1-2 short, high-impact paragraphs. Zero corporate buzzwords.`;
     let replyText = "";
     try {
       const genRes = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
         contents: prompt
       });
       replyText = genRes.text || "";
@@ -6171,7 +6171,7 @@ app.post("/api/partner/chat", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
 
     let contextPrompt = `You are 'ScoutPartner', an elite B2B Sales Strategist, Positioning Consultant, and copywriter specialized in winning custom-software and high-ticket automation consulting deals.
 Your partner is a solo software developer and automation engineer who has built an "Opportunity Radar" app.
@@ -6231,7 +6231,7 @@ app.post("/api/learning/simulate", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
 
     // Take top 4 opportunities to keep payload size optimal
     const sample = opportunities.slice(0, 4);
@@ -6309,7 +6309,7 @@ app.post("/api/learning/optimize", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.5-flash";
+    const model = "gemini-3.6-flash";
     const botConfig = loadBotConfig();
 
     // Group current opportunities to feed outcomes
@@ -6646,7 +6646,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     });
 
     // Request structured JSON output from Gemini with valid fallback models & backoff
-    const modelCandidates = ["gemini-3.5-flash", "gemini-3.5-flash"];
+    const modelCandidates = ["gemini-3.6-flash", "gemini-3.6-flash"];
     let response: any = null;
     let lastError: any = null;
 
