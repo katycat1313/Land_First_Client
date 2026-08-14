@@ -10,17 +10,18 @@ import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL || (process.env.SUPABASE_PROJECT_ID ? `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co` : null);
-const supabaseKey = process.env.SUPABASE_API_KEY || process.env.SUPABASE_KEY;
-
-const supabase = (supabaseUrl && supabaseKey) ? createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false }
-}) : null;
-
-if (supabase) {
-  console.log("[Supabase] 🔌 Connected. Persistent database integration is active!");
-} else {
-  console.log("[Supabase] ℹ️ Credentials missing. Using local JSON files / in-memory fallback.");
+let _supabaseInstance: any = null;
+function getSupabase() {
+  if (_supabaseInstance) return _supabaseInstance;
+  const url = process.env.SUPABASE_URL || (process.env.SUPABASE_PROJECT_ID ? `https://${process.env.SUPABASE_PROJECT_ID}.supabase.co` : null);
+  const key = process.env.SUPABASE_API_KEY || process.env.SUPABASE_KEY;
+  if (url && key) {
+    _supabaseInstance = createClient(url, key, {
+      auth: { persistSession: false }
+    });
+    console.log("[Supabase] 🔌 Connected. Persistent database integration is active!");
+  }
+  return _supabaseInstance;
 }
 
 let stripeClientInstance: Stripe | null = null;
@@ -526,7 +527,7 @@ function safeWriteFile(filePath: string, content: string): void {
   }
 
   // Push to Supabase asynchronously in the background
-  if (supabase) {
+  if (getSupabase()) {
     syncToSupabase(filePath, content).catch(err => {
       console.error("[Supabase Background Sync Exception]:", err);
     });
@@ -535,7 +536,8 @@ function safeWriteFile(filePath: string, content: string): void {
 
 // Background sync helper to mirror local filesystem changes to Supabase
 async function syncToSupabase(filePath: string, content: string) {
-  if (!supabase) return;
+  const db = getSupabase();
+  if (!db) return;
 
   try {
     const data = JSON.parse(content);
@@ -579,7 +581,7 @@ async function syncToSupabase(filePath: string, content: string) {
         }));
 
         if (dbOpps.length > 0) {
-          const { error } = await supabase.from("opportunities").upsert(dbOpps, { onConflict: "id" });
+          const { error } = await db.from("opportunities").upsert(dbOpps, { onConflict: "id" });
           if (error) console.error("[Supabase Sync Error] Opportunities:", error);
         }
       }
@@ -596,7 +598,7 @@ async function syncToSupabase(filePath: string, content: string) {
         platforms: data.platforms || []
       };
 
-      const { error } = await supabase.from("bot_config").upsert(dbConfig, { onConflict: "id" });
+      const { error } = await db.from("bot_config").upsert(dbConfig, { onConflict: "id" });
       if (error) console.error("[Supabase Sync Error] Bot Config:", error);
     }
     // 3. Alerts file
@@ -614,7 +616,7 @@ async function syncToSupabase(filePath: string, content: string) {
         }));
 
         if (dbAlerts.length > 0) {
-          const { error } = await supabase.from("alerts").upsert(dbAlerts, { onConflict: "id" });
+          const { error } = await db.from("alerts").upsert(dbAlerts, { onConflict: "id" });
           if (error) console.error("[Supabase Sync Error] Alerts:", error);
         }
       }
@@ -632,7 +634,7 @@ async function syncToSupabase(filePath: string, content: string) {
         }));
 
         if (dbEntries.length > 0) {
-          const { error } = await supabase.from("agent_memory_entries").upsert(dbEntries, { onConflict: "id" });
+          const { error } = await db.from("agent_memory_entries").upsert(dbEntries, { onConflict: "id" });
           if (error) console.error("[Supabase Sync Error] Memory Entries:", error);
         }
       }
@@ -647,7 +649,7 @@ async function syncToSupabase(filePath: string, content: string) {
         }));
 
         if (dbTasks.length > 0) {
-          const { error } = await supabase.from("offline_tasks").upsert(dbTasks, { onConflict: "id" });
+          const { error } = await db.from("offline_tasks").upsert(dbTasks, { onConflict: "id" });
           if (error) console.error("[Supabase Sync Error] Offline Tasks:", error);
         }
       }
@@ -659,12 +661,13 @@ async function syncToSupabase(filePath: string, content: string) {
 
 // Startup sync helper to pull the latest state from Supabase on boot
 async function syncSupabaseOnStartup() {
-  if (!supabase) return;
+  const db = getSupabase();
+  if (!db) return;
 
   console.log("[Supabase] 🔄 Synchronizing database tables with local cache...");
   try {
     // 1. Fetch Opportunities
-    const { data: dbOpps, error: oppsErr } = await supabase.from("opportunities").select("*");
+    const { data: dbOpps, error: oppsErr } = await db.from("opportunities").select("*");
     if (oppsErr) {
       console.error("[Supabase Startup Error] Failed to fetch opportunities:", oppsErr);
     } else if (dbOpps && dbOpps.length > 0) {
@@ -708,7 +711,7 @@ async function syncSupabaseOnStartup() {
     }
 
     // 2. Fetch Bot Config
-    const { data: dbConfigs, error: configErr } = await supabase.from("bot_config").select("*").eq("id", "singleton").single();
+    const { data: dbConfigs, error: configErr } = await db.from("bot_config").select("*").eq("id", "singleton").single();
     if (configErr && configErr.code !== "PGRST116") {
       console.error("[Supabase Startup Error] Failed to fetch config:", configErr);
     } else if (dbConfigs) {
@@ -726,7 +729,7 @@ async function syncSupabaseOnStartup() {
     }
 
     // 3. Fetch Alerts
-    const { data: dbAlerts, error: alertsErr } = await supabase.from("alerts").select("*").order("timestamp", { ascending: false });
+    const { data: dbAlerts, error: alertsErr } = await db.from("alerts").select("*").order("timestamp", { ascending: false });
     if (alertsErr) {
       console.error("[Supabase Startup Error] Failed to fetch alerts:", alertsErr);
     } else if (dbAlerts && dbAlerts.length > 0) {
@@ -746,8 +749,8 @@ async function syncSupabaseOnStartup() {
     }
 
     // 4. Fetch Agent Memory & Tasks
-    const { data: dbEntries, error: entriesErr } = await supabase.from("agent_memory_entries").select("*").order("timestamp", { ascending: false });
-    const { data: dbTasks, error: tasksErr } = await supabase.from("offline_tasks").select("*").order("timestamp", { ascending: false });
+    const { data: dbEntries, error: entriesErr } = await db.from("agent_memory_entries").select("*").order("timestamp", { ascending: false });
+    const { data: dbTasks, error: tasksErr } = await db.from("offline_tasks").select("*").order("timestamp", { ascending: false });
 
     if (!entriesErr && !tasksErr) {
       const memory = {
@@ -7430,7 +7433,7 @@ const HOST = process.env.HOST || "127.0.0.1";
 const server = app.listen(PORT, HOST, async () => {
   console.log(`AI Opportunity Discovery Engine running on http://localhost:${PORT}`);
 
-  if (supabase) {
+  if (getSupabase()) {
     await syncSupabaseOnStartup();
   }
 
@@ -7619,6 +7622,22 @@ let expressHandler: any = null;
 export default {
   async fetch(request: any, env: any, ctx: any): Promise<Response> {
     const url = new URL(request.url);
+
+    // Copy env properties to process.env so that Express routes and global utilities can access secrets
+    if (env) {
+      for (const [key, val] of Object.entries(env)) {
+        if (typeof val === "string") {
+          process.env[key] = val;
+        }
+      }
+    }
+
+    // Trigger asynchronous Supabase database sync on boot (first request inside isolate)
+    const dbClient = getSupabase();
+    if (dbClient && !(globalThis as any).__supabaseSynced) {
+      (globalThis as any).__supabaseSynced = true;
+      ctx.waitUntil(syncSupabaseOnStartup());
+    }
 
     // 1. Intercept Deepgram WebSocket Upgrade request in Workers environment
     if (url.pathname === "/api/deepgram/ws" && request.headers.get("Upgrade") === "websocket") {
