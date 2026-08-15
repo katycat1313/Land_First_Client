@@ -70,7 +70,12 @@ export default function PacOverlay({
     inputModeRef.current = inputMode;
   }, [inputMode]);
 
-  const [pacStatus, setPacStatus] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
+  const [pacStatus, setPacStatusState] = useState<"idle" | "listening" | "thinking" | "speaking">("idle");
+  const pacStatusRef = useRef<"idle" | "listening" | "thinking" | "speaking">("idle");
+  const setPacStatus = (status: "idle" | "listening" | "thinking" | "speaking") => {
+    pacStatusRef.current = status;
+    setPacStatusState(status);
+  };
   const [textInput, setTextInput] = useState("");
   const [messages, setMessages] = useState<Array<{ role: "user" | "pac"; text: string; time: string }>>(() => {
     try {
@@ -2076,6 +2081,10 @@ registerProcessor('pcm-processor', PCMProcessor);
 
             workletNode.port.onmessage = (e) => {
               if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                // Skip sending mic audio while P.A.C. is speaking or thinking to prevent feedback loops and buffer lag
+                if (pacStatusRef.current === "speaking" || pacStatusRef.current === "thinking" || activeSourcesRef.current.length > 0) {
+                  return;
+                }
                 const inputBuffer: Float32Array = e.data;
                 const pcm16 = new Int16Array(inputBuffer.length);
                 for (let i = 0; i < inputBuffer.length; i++) {
@@ -2101,6 +2110,10 @@ registerProcessor('pcm-processor', PCMProcessor);
 
           scriptNode.onaudioprocess = (e) => {
             if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+              // Skip sending mic audio while P.A.C. is speaking or thinking to prevent feedback loops and buffer lag
+              if (pacStatusRef.current === "speaking" || pacStatusRef.current === "thinking" || activeSourcesRef.current.length > 0) {
+                return;
+              }
               const inputBuffer = e.inputBuffer.getChannelData(0);
               const pcm16 = new Int16Array(inputBuffer.length);
               for (let i = 0; i < inputBuffer.length; i++) {
