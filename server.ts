@@ -465,6 +465,74 @@ async function callOllamaLLM({
   return data.message?.content || data.response || "";
 }
 
+// Fallback LLM generation using OpenAI GPT-4o-Mini
+async function callOpenAILLM({
+  systemPrompt,
+  prompt,
+  history = [],
+  responseJson = false,
+  temperature = 0.7
+}: {
+  systemPrompt?: string;
+  prompt: string;
+  history?: Array<{ role: string; content?: string; text?: string }>;
+  responseJson?: boolean;
+  temperature?: number;
+}): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured in environment.");
+  }
+
+  const messages: any[] = [];
+  if (systemPrompt) {
+    messages.push({ role: "system", content: systemPrompt });
+  }
+
+  for (const turn of history) {
+    const role = turn.role === "pac" || turn.role === "assistant" ? "assistant" : "user";
+    const content = turn.content || turn.text || "";
+    if (content) {
+      messages.push({ role, content });
+    }
+  }
+
+  messages.push({ role: "user", content: prompt });
+
+  const bodyPayload: any = {
+    model: "gpt-4o-mini",
+    messages,
+    temperature
+  };
+
+  if (responseJson) {
+    bodyPayload.response_format = { type: "json_object" };
+  }
+
+  console.log("[LLM Unified] Requesting fallback generation via OpenAI GPT-4o-Mini...");
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(bodyPayload)
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`OpenAI API returned error (${res.status}): ${errorText}`);
+  }
+
+  const data: any = await res.json();
+  const output = data.choices?.[0]?.message?.content;
+  if (!output) {
+    throw new Error("OpenAI API returned empty response.");
+  }
+
+  return output;
+}
+
 // Provider-agnostic LLM executor (Tries Ollama Qwen2.5 if active, falls back to Gemini)
 async function generateUnifiedLLM({
   systemPrompt,
@@ -537,7 +605,24 @@ async function generateUnifiedLLM({
     }
   }
 
-  throw lastErr || new Error("All Gemini fallback models failed.");
+  // Try OpenAI as final fallback if configured and other engines failed
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      console.warn("[LLM Unified] Both Ollama and Gemini failed or were rate-limited. Falling back to OpenAI GPT-4o-Mini...");
+      const result = await callOpenAILLM({
+        systemPrompt,
+        prompt,
+        history,
+        responseJson,
+        temperature
+      });
+      if (result) return result;
+    } catch (openaiErr: any) {
+      console.error(`[LLM Unified] OpenAI fallback failed: ${openaiErr.message}`);
+    }
+  }
+
+  throw lastErr || new Error("All LLM providers (Ollama, Gemini, OpenAI) failed.");
 }
 
 // Data storage setup
@@ -6884,6 +6969,27 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     }
 
     if (!response) {
+      if (process.env.OPENAI_API_KEY) {
+        try {
+          console.warn("[P.A.C. Chat] Gemini rate limit hit. Falling back to OpenAI GPT-4o-Mini...");
+          const openAiResult = await callOpenAILLM({
+            systemPrompt: pacSystemPrompt,
+            prompt: message,
+            history: chatHistory.map((h: any) => ({
+              role: h.role === "pac" || h.role === "assistant" ? "assistant" : "user",
+              content: h.text || h.content || ""
+            })),
+            responseJson: true
+          });
+          const parsed = safeParseJSON(openAiResult);
+          if (parsed && parsed.response) {
+            return res.json(parsed);
+          }
+        } catch (openaiErr: any) {
+          console.error("[P.A.C. Chat] OpenAI fallback failed:", openaiErr);
+        }
+      }
+
       console.warn("[P.A.C. Chat] Gemini API limit reached or temporarily unavailable. Returning co-founder fallback response.");
       return res.json({
         response: "I'm temporarily pacing our Gemini API request rate to keep our quota healthy! Give me about 15 seconds to cool down and try sending your message again, or let's review our active CRM pipeline on screen.",
