@@ -336,54 +336,63 @@ function consumeSubrequestBudget(budget: SubrequestBudget | undefined, label: st
 async function fetchWithSlingshot(url: string, options?: RequestInit, budget?: SubrequestBudget): Promise<Response> {
   const macUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "").trim().replace(/\/$/, "");
   const g14Url = (llmConfig.g14TunnelUrl || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
-  
+
   if (llmConfig.useSlingshot !== false) {
-    // 1. Try Primary Mac Tunnel first
-    if (macUrl) {
-      try {
-        const proxyUrl = `${macUrl}/proxy?url=${encodeURIComponent(url)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
-        
-        const res = await fetch(proxyUrl, {
-          headers: options?.headers,
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if (res.ok) {
-          return res;
+    // 1. Try Primary Mac Tunnel first (skip immediately if it already failed once this sweep)
+    if (macUrl && !budget?.tunnelDead.mac) {
+      if (consumeSubrequestBudget(budget, `Mac tunnel -> ${url}`)) {
+        try {
+          const proxyUrl = `${macUrl}/proxy?url=${encodeURIComponent(url)}`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+          const res = await fetch(proxyUrl, {
+            headers: options?.headers,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            return res;
+          }
+          console.warn(`[G14 Slingshot] Mac tunnel returned HTTP ${res.status}. Trying fallback...`);
+        } catch (macErr: any) {
+          console.warn(`[G14 Slingshot] Mac tunnel unreachable (${macErr.message || macErr}). Marking dead for this sweep.`);
+          if (budget) budget.tunnelDead.mac = true;
         }
-        console.warn(`[G14 Slingshot] Mac tunnel returned HTTP ${res.status}. Trying fallback...`);
-      } catch (macErr: any) {
-        console.warn(`[G14 Slingshot] Mac tunnel unreachable (${macErr.message || macErr}). Trying fallback...`);
       }
     }
-    
-    // 2. Try Secondary G14 Tunnel fallback
-    if (g14Url) {
-      try {
-        const proxyUrl = `${g14Url}/proxy?url=${encodeURIComponent(url)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
-        
-        const res = await fetch(proxyUrl, {
-          headers: options?.headers,
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        if (res.ok) {
-          return res;
+
+    // 2. Try Secondary G14 Tunnel fallback (skip immediately if already dead this sweep)
+    if (g14Url && !budget?.tunnelDead.g14) {
+      if (consumeSubrequestBudget(budget, `G14 tunnel -> ${url}`)) {
+        try {
+          const proxyUrl = `${g14Url}/proxy?url=${encodeURIComponent(url)}`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+          const res = await fetch(proxyUrl, {
+            headers: options?.headers,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            return res;
+          }
+          console.warn(`[G14 Slingshot] G14 tunnel returned HTTP ${res.status}. Falling back to direct...`);
+        } catch (g14Err: any) {
+          console.warn(`[G14 Slingshot] G14 tunnel unreachable (${g14Err.message || g14Err}). Marking dead for this sweep.`);
+          if (budget) budget.tunnelDead.g14 = true;
         }
-        console.warn(`[G14 Slingshot] G14 tunnel returned HTTP ${res.status}. Falling back to direct...`);
-      } catch (g14Err: any) {
-        console.warn(`[G14 Slingshot] G14 tunnel unreachable (${g14Err.message || g14Err}). Falling back to direct...`);
       }
     }
   }
-  
+
   // 3. Direct fetch fallback
+  if (!consumeSubrequestBudget(budget, `Direct fetch -> ${url}`)) {
+    throw new Error(`Subrequest budget exhausted before direct fetch: ${url}`);
+  }
   return fetch(url, options);
 }
 
@@ -1739,7 +1748,7 @@ async function scrapeHackerNewsComments(keyword: string, sector: string, semanti
 }
 
 // 7.5. Scrape real Reddit posts from target subreddits using free, public unauthenticated JSON endpoints
-async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQueries?: string[]): Promise<any[]> {
+async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQueries?: string[], budget?: SubrequestBudget): Promise<any[]> {
   const cacheKey = `reddit-${sector || "All"}-${keyword || ""}`;
   const cached = scraperCache[cacheKey];
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -1770,8 +1779,11 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
         ? [keyword]
         : ["manual", "tedious", "spreadsheet", "workflow", "anyone else", "is there a way", "need help"]);
 
-    // Search up to 3 subreddits in the sector list instead of just subs[0]
-    const targetSubs = subs.slice(0, 3);
+    // Trimmed from 3 subs x 3 queries (up to 9+ fetches, each up to 3x under the old
+    // tunnel-cascade) to 2 x 2 = 4 fetches max, to stay well under the Workers
+    // subrequest cap across all 10 platforms combined.
+    const targetSubs = subs.slice(0, 2);
+    const targetQueries = queries.slice(0, 2);
     const headers = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 (OpportunityRadar/1.0 by /u/katycat1313)",
       "Accept": "application/json, text/plain, */*",
@@ -1779,18 +1791,29 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
     };
 
     for (const sub of targetSubs) {
-      for (const q of queries.slice(0, 3)) {
-        await delayMs(800);
+      for (const q of targetQueries) {
+        if (budget && budget.remaining <= 0) {
+          console.log(`[Reddit] Subrequest budget exhausted, stopping early with ${allHits.length} hits so far.`);
+          break;
+        }
         const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&limit=8`;
         console.log(`Crawling Reddit r/${sub} for query: "${q}" (via Slingshot proxy/direct)...`);
 
-        let response = await fetchWithSlingshot(url, { headers });
+        let response: Response;
+        try {
+          response = await fetchWithSlingshot(url, { headers }, budget);
+        } catch {
+          continue;
+        }
 
-        if (!response.ok) {
-          // Fallback to r/${sub}/new.json if search.json returns 403 or non-200
-          await delayMs(500);
+        // Single fallback only (no third RSS fallback layer) to cap worst-case cost per query
+        if (!response.ok && budget?.remaining !== 0) {
           const fallbackUrl = `https://www.reddit.com/r/${sub}/new.json?limit=8`;
-          response = await fetchWithSlingshot(fallbackUrl, { headers });
+          try {
+            response = await fetchWithSlingshot(fallbackUrl, { headers }, budget);
+          } catch {
+            continue;
+          }
         }
 
         if (response.ok) {
@@ -1809,40 +1832,6 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
               });
             }
           }
-        } else {
-          console.log(`[Reddit] Public JSON search for r/${sub} returned status: ${response.status}. Trying Subreddit Atom/RSS stream...`);
-          const rssUrl = `https://www.reddit.com/r/${sub}/new/.rss`;
-          const rssHits = await scrapeRSSFeed(rssUrl, `Reddit (r/${sub})`);
-          allHits.push(...rssHits);
-        }
-      }
-    }
-
-    // Fallback global Reddit search if we got very few posts and are in default discovery mode
-    if (allHits.length < 3) {
-      console.log(`Too few results for sector ${sector} in targeted subreddits. Running global Reddit fallback search...`);
-      const globalQuery = keyword
-        ? keyword
-        : `${sector.split(' ')[0]} manual spreadsheet`;
-
-      await delayMs(800);
-      const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(globalQuery)}&sort=relevance&limit=15`;
-      const response = await fetchWithSlingshot(url, { headers });
-      if (response.ok) {
-        const data: any = await response.json();
-        const children = data?.data?.children || [];
-        for (const child of children) {
-          const post = child.data;
-          if (post && post.selftext && post.selftext.length > 50) {
-            allHits.push({
-              id: `reddit-${post.id}`,
-              author: post.author || "Reddit_User",
-              sourcePlatform: `Reddit (r/${post.subreddit || "all"})`,
-              sourceUrl: `https://www.reddit.com${post.permalink}`,
-              text: `${post.title}\n\n${post.selftext}`.substring(0, 1500),
-              title: post.title || "Discussion on Reddit"
-            });
-          }
         }
       }
     }
@@ -1856,7 +1845,7 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
 }
 
 // 7.6.b Scrape Discourse communities
-async function scrapeDiscourse(domain: string, keyword: string, sector: string, semanticQueries?: string[]): Promise<any[]> {
+async function scrapeDiscourse(domain: string, keyword: string, sector: string, semanticQueries?: string[], budget?: SubrequestBudget): Promise<any[]> {
   const cacheKey = `discourse-${domain}-${sector || "All"}-${keyword || ""}`;
   const cached = scraperCache[cacheKey];
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -1873,16 +1862,24 @@ async function scrapeDiscourse(domain: string, keyword: string, sector: string, 
     let cleanDomain = domain.replace(/https?:\/\//i, "").split("/")[0];
     if (!cleanDomain) return [];
 
-    // Search up to 3 queries to avoid rate limits
-    for (const q of queries.slice(0, 3)) {
-      await delayMs(1000);
+    // Trimmed from 3 queries to 2 per forum to bound worst-case subrequests
+    for (const q of queries.slice(0, 2)) {
+      if (budget && budget.remaining <= 0) {
+        console.log(`[Discourse] Subrequest budget exhausted for ${cleanDomain}, stopping early.`);
+        break;
+      }
       const url = `https://${cleanDomain}/search.json?q=${encodeURIComponent(q)}`;
       console.log(`[Discourse] Searching ${cleanDomain} for query: "${q}" (via Slingshot proxy/direct)...`);
-      const response = await fetchWithSlingshot(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        }
-      });
+      let response: Response;
+      try {
+        response = await fetchWithSlingshot(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+          }
+        }, budget);
+      } catch {
+        continue;
+      }
 
       if (response.ok) {
         const data: any = await response.json();
@@ -1916,9 +1913,9 @@ async function scrapeDiscourse(domain: string, keyword: string, sector: string, 
       }
     }
 
-    // Fallback to latest.json if search yielded no results
-    if (results.length === 0) {
-      await delayMs(1000);
+    // Fallback to latest.json if search yielded no results (still budget-gated —
+    // this was previously an ungated bare fetch() outside the budget system entirely)
+    if (results.length === 0 && consumeSubrequestBudget(budget, `Discourse latest.json -> ${cleanDomain}`)) {
       const url = `https://${cleanDomain}/latest.json`;
       console.log(`[Discourse Fallback] Fetching latest topics from ${cleanDomain}...`);
       const response = await fetch(url, {
@@ -1986,7 +1983,7 @@ function hashString(str: string): string {
 }
 
 // 7.6.c Scrape public RSS feeds
-async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any[]> {
+async function scrapeRSSFeed(feedUrl: string, platformName: string, budget?: SubrequestBudget): Promise<any[]> {
   const cacheKey = `rss-${feedUrl}`;
   const cached = scraperCache[cacheKey];
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -1997,12 +1994,21 @@ async function scrapeRSSFeed(feedUrl: string, platformName: string): Promise<any
   const results: any[] = [];
   try {
     console.log(`[RSS Crawler] Fetching feed: ${feedUrl}...`);
-    const response = await fetchWithSlingshot(feedUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/rss+xml, application/atom+xml, text/xml, application/xml, */*"
-      }
-    });
+    if (budget && budget.remaining <= 0) {
+      console.log(`[RSS Crawler] Subrequest budget exhausted, skipping ${feedUrl}.`);
+      return [];
+    }
+    let response: Response;
+    try {
+      response = await fetchWithSlingshot(feedUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Accept": "application/rss+xml, application/atom+xml, text/xml, application/xml, */*"
+        }
+      }, budget);
+    } catch {
+      return [];
+    }
 
     if (!response.ok) {
       console.log(`[RSS Crawler] Feed ${feedUrl} returned status: ${response.status}. Handled gracefully.`);
@@ -2410,6 +2416,71 @@ app.post("/api/cache/clear", (req, res) => {
 });
 
 // 8. AI Continuous Discovery Query (100% live crawling, zero fake/synthetic data)
+// ==========================================
+// Buyer-intent, urgency & sentiment pre-scoring
+// ==========================================
+// Runs cheaply (no API calls) over every raw scraped item BEFORE it goes to Gemini.
+// Purpose: stop paying AI tokens to evaluate topical-but-low-value chatter, and push
+// posts showing genuine near-term need / willingness to pay to the top so the AI (and
+// the person reviewing leads) sees the strongest signals first. This does not replace
+// the Gemini classification — it narrows and ranks what Gemini sees.
+const URGENCY_PHRASES = [
+  "asap", "urgently", "urgent", "immediately", "right now", "this week",
+  "before it's too late", "running out of time", "deadline", "losing clients",
+  "losing customers", "losing money", "can't keep up", "falling behind",
+  "need this fixed", "need this solved", "need a fix now"
+];
+const BUYING_INTENT_PHRASES = [
+  "willing to pay", "budget for", "looking to hire", "need someone to build",
+  "does anyone know a tool", "recommend a tool", "recommend a service",
+  "paying for", "looking for a solution", "need a developer", "need an agency",
+  "open to paying", "would pay", "in the market for", "shopping for",
+  "evaluating options", "looking to switch", "looking to outsource",
+  "any recommendations for a tool", "any recommendations for software",
+  "who do you use for", "what do you use for"
+];
+const FRUSTRATION_PHRASES = [
+  "so frustrated", "sick of", "tired of", "hate doing", "waste of time",
+  "drowning in", "nightmare", "fed up", "burned out", "overwhelmed",
+  "driving me crazy", "at my wit's end", "can't take it anymore"
+];
+const MANUAL_PAIN_PHRASES = [
+  "manually", "by hand", "spreadsheet", "excel", "copy and paste",
+  "copy-paste", "every single time", "hours every week", "hours a week",
+  "every time i have to"
+];
+// Signals this is promotional / a solution being pitched, not a genuine buyer — demote hard.
+const PROMOTIONAL_PHRASES = [
+  "i built", "i made", "i launched", "check out my", "we built",
+  "introducing", "announcing", "my product", "open source", "new tool",
+  "beta users", "released today", "affiliate link", "use my code",
+  "discount code", "sign up for my"
+];
+
+function scoreBuyerIntent(text: string): { score: number; signals: string[] } {
+  const lower = (text || "").toLowerCase();
+  let score = 0;
+  const signals: string[] = [];
+
+  for (const p of URGENCY_PHRASES) {
+    if (lower.includes(p)) { score += 3; signals.push(`urgency:"${p}"`); }
+  }
+  for (const p of BUYING_INTENT_PHRASES) {
+    if (lower.includes(p)) { score += 4; signals.push(`buyer-intent:"${p}"`); }
+  }
+  for (const p of FRUSTRATION_PHRASES) {
+    if (lower.includes(p)) { score += 2; signals.push(`frustration:"${p}"`); }
+  }
+  for (const p of MANUAL_PAIN_PHRASES) {
+    if (lower.includes(p)) { score += 1; signals.push(`manual-pain:"${p}"`); }
+  }
+  for (const p of PROMOTIONAL_PHRASES) {
+    if (lower.includes(p)) { score -= 4; signals.push(`promotional:"${p}"`); }
+  }
+
+  return { score, signals };
+}
+
 app.post("/api/opportunities/discover", async (req, res) => {
   const { sector, keyword, discoveryMode, bypassCache } = req.body;
   const targetSector = sector || "All";
@@ -2486,183 +2557,210 @@ app.post("/api/opportunities/discover", async (req, res) => {
       return enabled;
     };
 
-    // 1. Scrape real Hacker News comments matching these semantic queries
+    // Shared subrequest budget for this entire sweep. Cloudflare Workers cap outbound
+    // fetches per invocation (50 on Free, 1000 on Bundled). We keep well under the
+    // Free-plan cap here (35, leaving headroom for the Gemini call + any other fetches
+    // this request makes) so a sweep degrades gracefully with partial results instead
+    // of 500ing. Bump this if/when the Worker is on the Bundled plan.
+    const subrequestBudget = createSubrequestBudget(35);
+    const budgetOk = () => {
+      if (subrequestBudget.remaining <= 0) {
+        logTrace(`⚠️ Subrequest budget exhausted (0 remaining) — skipping remaining platforms for this sweep.`);
+        return false;
+      }
+      return true;
+    };
+
+    // Crawl all enabled platforms concurrently instead of one-at-a-time. This cuts wall-clock
+    // latency dramatically (previously ~30s+ of fully serial awaits) without changing the total
+    // subrequest count — every task still funnels through the same shared `subrequestBudget`,
+    // and each task's budget check runs synchronously before its first await, so priority order
+    // is preserved even though execution overlaps.
     let scrapedHN: any[] = [];
-    if (isEnabled("hn")) {
-      logTrace(`[Hacker News] Initiating crawler for query "${keyword || ""}"...`);
-      try {
-        scrapedHN = await scrapeHackerNewsComments(keyword, targetSector, semanticQueries);
-        logTrace(`[Hacker News] Successfully crawled ${scrapedHN.length} comments.`);
-      } catch (e: any) {
-        logTrace(`❌ [Hacker News] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 2. Scrape real Reddit posts matching these semantic queries (Completely FREE and Unauthenticated)
     let scrapedReddit: any[] = [];
-    if (isEnabled("reddit")) {
-      logTrace(`[Reddit] Initiating public JSON search crawler for subreddits...`);
-      try {
-        scrapedReddit = await scrapeRedditPublicJSON(keyword, targetSector, semanticQueries);
-        logTrace(`[Reddit] Successfully crawled ${scrapedReddit.length} posts.`);
-      } catch (e: any) {
-        logTrace(`❌ [Reddit] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 3. Scrape real GitHub Issues matching these semantic queries (Completely FREE and Unauthenticated)
     let scrapedGitHub: any[] = [];
-    if (isEnabled("github")) {
-      logTrace(`[GitHub] Initiating public Issues crawler...`);
-      try {
-        scrapedGitHub = await scrapeGitHubIssues(keyword, targetSector, semanticQueries);
-        logTrace(`[GitHub] Successfully crawled ${scrapedGitHub.length} issues.`);
-      } catch (e: any) {
-        logTrace(`❌ [GitHub] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 4. Scrape real Mastodon statuses matching this query
     let scrapedMastodon: any[] = [];
-    if (isEnabled("mastodon")) {
-      logTrace(`[Mastodon] Initiating public timeline crawler...`);
-      try {
-        scrapedMastodon = await scrapeMastodonStatuses(keyword, targetSector);
-        logTrace(`[Mastodon] Successfully crawled ${scrapedMastodon.length} statuses.`);
-      } catch (e: any) {
-        logTrace(`❌ [Mastodon] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 5. Scrape real Stack Exchange questions matching these semantic queries
     let scrapedSE: any[] = [];
-    if (isEnabled("stackexchange")) {
-      logTrace(`[Stack Exchange] Initiating public questions crawler...`);
-      try {
-        scrapedSE = await scrapeStackExchange(keyword, targetSector, semanticQueries);
-        logTrace(`[Stack Exchange] Successfully crawled ${scrapedSE.length} questions.`);
-      } catch (e: any) {
-        logTrace(`❌ [Stack Exchange] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 6. If Discord is enabled and credentials exist, scrape configured Discord channels
     let scrapedDiscord: any[] = [];
-    if (isEnabled("discord")) {
-      try {
-        const discordPlat = config.platforms.find((p: any) => p.platformId === "discord");
-        if (discordPlat && discordPlat.botToken) {
-          const activeTargets = discordPlat.targets.filter((t: any) => t.isEnabled);
-          logTrace(`[Discord] Scanning ${activeTargets.length} active channel targets...`);
-          for (const target of activeTargets) {
-            logTrace(`[Discord] Fetching channel: "${target.name}" (${target.urlOrPath})`);
-            const results = await scrapeDiscordMessages(discordPlat.botToken, target.urlOrPath);
-            scrapedDiscord.push(...results);
-          }
-          logTrace(`[Discord] Crawling completed. Aggregated ${scrapedDiscord.length} messages.`);
-        } else {
-          logTrace("[Discord] Missing Bot Token or channel configurations. Crawler skipped.");
-        }
-      } catch (e: any) {
-        logTrace(`❌ [Discord] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 7. Scrape Discourse forums if enabled
     let scrapedDiscourse: any[] = [];
-    if (isEnabled("discourse")) {
-      logTrace(`[Discourse] Initiating public forum crawler...`);
-      try {
-        const discoursePlat = config.platforms.find((p: any) => p.platformId === "discourse");
-        if (discoursePlat) {
-          const activeTargets = discoursePlat.targets.filter((t: any) => t.isEnabled);
-          for (const target of activeTargets) {
-            logTrace(`[Discourse] Searching forum "${target.name}" (${target.urlOrPath}) for sector-specific topics...`);
-            const results = await scrapeDiscourse(target.urlOrPath, keyword, targetSector, semanticQueries);
-            scrapedDiscourse.push(...results);
-          }
-          logTrace(`[Discourse] Successfully crawled ${scrapedDiscourse.length} posts from active forums.`);
-        }
-      } catch (e: any) {
-        logTrace(`❌ [Discourse] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 8. Scrape RSS feeds if enabled
     let scrapedRSS: any[] = [];
-    if (isEnabled("rss")) {
-      logTrace(`[RSS] Initiating public RSS feed scanner...`);
-      try {
-        const rssPlat = config.platforms.find((p: any) => p.platformId === "rss");
-        if (rssPlat) {
-          const activeTargets = rssPlat.targets.filter((t: any) => t.isEnabled);
-          for (const target of activeTargets) {
-            logTrace(`[RSS] Fetching and scanning RSS feed: "${target.name}" (${target.urlOrPath})...`);
-            const results = await scrapeRSSFeed(target.urlOrPath, `RSS (${target.name})`);
-            scrapedRSS.push(...results);
-          }
-          logTrace(`[RSS] Successfully crawled ${scrapedRSS.length} entries from connected RSS feeds.`);
-        }
-      } catch (e: any) {
-        logTrace(`❌ [RSS] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 9. Scrape Quora Topic feeds if enabled (dynamic sector targeting)
     let scrapedQuora: any[] = [];
-    if (isEnabled("quora")) {
-      logTrace(`[Quora] Initiating public RSS crawler with dynamic sector-level targeting...`);
-      try {
-        const quoraPlat = config.platforms.find((p: any) => p.platformId === "quora");
-        if (quoraPlat) {
-          const sectorQuoraTopics: Record<string, string[]> = {
-            "Healthcare Operations": ["Healthcare", "Hospital-Administration", "Medicine-and-Healthcare"],
-            "Real Estate & Property Management": ["Real-Estate", "Property-Management", "Landlords"],
-            "Construction & Subcontracting": ["Construction-Industry", "Contractors", "Home-Improvement"],
-            "Professional Services (Accounting/CPA/Law)": ["Accounting", "Bookkeeping", "Lawyers"],
-            "Local Small Businesses": ["Small-Businesses", "Local-Businesses", "Entrepreneurship"],
-            "Finance & Invoicing Workflows": ["Invoicing", "Billing", "Bookkeeping"],
-            "E-commerce & Retail Logistics": ["E-Commerce", "Shopify", "Drop-Shipping"],
-            "Marketing agency": ["Marketing-Agencies", "Digital-Marketing", "Advertising"],
-            "Niche Hobby Forums / Communities": ["Online-Communities", "Forum-Software"]
-          };
-          const topics = sectorQuoraTopics[targetSector] || ["Small-Businesses", "Operations-Management", "Business-Automation"];
-
-          for (const topic of topics) {
-            logTrace(`[Quora] Fetching live sector-specific topic feed: "${topic.replace(/-/g, ' ')}"...`);
-            const cleanTopic = topic.replace(/-/g, ' ');
-            const url = `https://news.google.com/rss/search?q=site:quora.com+${encodeURIComponent(cleanTopic)}+problem+OR+workflow&hl=en-US&gl=US&ceid=US:en`;
-            const results = await scrapeRSSFeed(url, `Quora (${cleanTopic})`);
-            scrapedQuora.push(...results);
-          }
-          logTrace(`[Quora] Successfully crawled ${scrapedQuora.length} posts for sector "${targetSector}".`);
-        }
-      } catch (e: any) {
-        logTrace(`❌ [Quora] Crawling failed: ${e.message || e}`);
-      }
-    }
-
-    // 10. Scrape Custom Forums via Firecrawl if enabled
     let scrapedFirecrawl: any[] = [];
-    if (isEnabled("firecrawl")) {
-      logTrace(`[Firecrawl] Initiating custom web crawler for configured targets...`);
-      try {
-        const fcPlat = config.platforms.find((p: any) => p.platformId === "firecrawl");
-        if (fcPlat && process.env.FIRECRAWL_API_KEY) {
-          const activeTargets = fcPlat.targets.filter((t: any) => t.isEnabled);
-          for (const target of activeTargets) {
-            logTrace(`[Firecrawl] Crawling target: "${target.name}" (${target.urlOrPath})...`);
-            const results = await scrapeWithFirecrawl(target.urlOrPath, target.name || "Custom Web Target");
-            scrapedFirecrawl.push(...results);
-          }
-          logTrace(`[Firecrawl] Successfully crawled ${scrapedFirecrawl.length} pages from active targets.`);
-        } else if (!process.env.FIRECRAWL_API_KEY) {
-          logTrace("[Firecrawl] ⚠️ FIRECRAWL_API_KEY not configured. Crawler skipped.");
+
+    const crawlTasks: (() => Promise<void>)[] = [
+      async () => {
+        if (!(isEnabled("hn") && budgetOk())) return;
+        logTrace(`[Hacker News] Initiating crawler for query "${keyword || ""}"...`);
+        try {
+          scrapedHN = await scrapeHackerNewsComments(keyword, targetSector, semanticQueries);
+          logTrace(`[Hacker News] Successfully crawled ${scrapedHN.length} comments.`);
+        } catch (e: any) {
+          logTrace(`❌ [Hacker News] Crawling failed: ${e.message || e}`);
         }
-      } catch (e: any) {
-        logTrace(`❌ [Firecrawl] Crawling failed: ${e.message || e}`);
+      },
+      async () => {
+        if (!(isEnabled("reddit") && budgetOk())) return;
+        logTrace(`[Reddit] Initiating public JSON search crawler for subreddits...`);
+        try {
+          scrapedReddit = await scrapeRedditPublicJSON(keyword, targetSector, semanticQueries, subrequestBudget);
+          logTrace(`[Reddit] Successfully crawled ${scrapedReddit.length} posts. (Budget remaining: ${subrequestBudget.remaining})`);
+        } catch (e: any) {
+          logTrace(`❌ [Reddit] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("github") && budgetOk())) return;
+        logTrace(`[GitHub] Initiating public Issues crawler...`);
+        try {
+          scrapedGitHub = await scrapeGitHubIssues(keyword, targetSector, semanticQueries);
+          logTrace(`[GitHub] Successfully crawled ${scrapedGitHub.length} issues.`);
+        } catch (e: any) {
+          logTrace(`❌ [GitHub] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("mastodon") && budgetOk())) return;
+        logTrace(`[Mastodon] Initiating public timeline crawler...`);
+        try {
+          scrapedMastodon = await scrapeMastodonStatuses(keyword, targetSector);
+          logTrace(`[Mastodon] Successfully crawled ${scrapedMastodon.length} statuses.`);
+        } catch (e: any) {
+          logTrace(`❌ [Mastodon] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("stackexchange") && budgetOk())) return;
+        logTrace(`[Stack Exchange] Initiating public questions crawler...`);
+        try {
+          scrapedSE = await scrapeStackExchange(keyword, targetSector, semanticQueries);
+          logTrace(`[Stack Exchange] Successfully crawled ${scrapedSE.length} questions.`);
+        } catch (e: any) {
+          logTrace(`❌ [Stack Exchange] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("discord") && budgetOk())) return;
+        try {
+          const discordPlat = config.platforms.find((p: any) => p.platformId === "discord");
+          if (discordPlat && discordPlat.botToken) {
+            const activeTargets = discordPlat.targets.filter((t: any) => t.isEnabled);
+            logTrace(`[Discord] Scanning ${activeTargets.length} active channel targets...`);
+            for (const target of activeTargets) {
+              if (subrequestBudget.remaining <= 0) {
+                logTrace(`[Discord] Subrequest budget exhausted, stopping early.`);
+                break;
+              }
+              subrequestBudget.remaining--;
+              logTrace(`[Discord] Fetching channel: "${target.name}" (${target.urlOrPath})`);
+              const results = await scrapeDiscordMessages(discordPlat.botToken, target.urlOrPath);
+              scrapedDiscord.push(...results);
+            }
+            logTrace(`[Discord] Crawling completed. Aggregated ${scrapedDiscord.length} messages.`);
+          } else {
+            logTrace("[Discord] Missing Bot Token or channel configurations. Crawler skipped.");
+          }
+        } catch (e: any) {
+          logTrace(`❌ [Discord] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("discourse") && budgetOk())) return;
+        logTrace(`[Discourse] Initiating public forum crawler...`);
+        try {
+          const discoursePlat = config.platforms.find((p: any) => p.platformId === "discourse");
+          if (discoursePlat) {
+            const activeTargets = discoursePlat.targets.filter((t: any) => t.isEnabled);
+            for (const target of activeTargets) {
+              if (!budgetOk()) break;
+              logTrace(`[Discourse] Searching forum "${target.name}" (${target.urlOrPath}) for sector-specific topics...`);
+              const results = await scrapeDiscourse(target.urlOrPath, keyword, targetSector, semanticQueries, subrequestBudget);
+              scrapedDiscourse.push(...results);
+            }
+            logTrace(`[Discourse] Successfully crawled ${scrapedDiscourse.length} posts from active forums. (Budget remaining: ${subrequestBudget.remaining})`);
+          }
+        } catch (e: any) {
+          logTrace(`❌ [Discourse] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("rss") && budgetOk())) return;
+        logTrace(`[RSS] Initiating public RSS feed scanner...`);
+        try {
+          const rssPlat = config.platforms.find((p: any) => p.platformId === "rss");
+          if (rssPlat) {
+            const activeTargets = rssPlat.targets.filter((t: any) => t.isEnabled);
+            for (const target of activeTargets) {
+              if (!budgetOk()) break;
+              logTrace(`[RSS] Fetching and scanning RSS feed: "${target.name}" (${target.urlOrPath})...`);
+              const results = await scrapeRSSFeed(target.urlOrPath, `RSS (${target.name})`, subrequestBudget);
+              scrapedRSS.push(...results);
+            }
+            logTrace(`[RSS] Successfully crawled ${scrapedRSS.length} entries from connected RSS feeds. (Budget remaining: ${subrequestBudget.remaining})`);
+          }
+        } catch (e: any) {
+          logTrace(`❌ [RSS] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("quora") && budgetOk())) return;
+        logTrace(`[Quora] Initiating public RSS crawler with dynamic sector-level targeting...`);
+        try {
+          const quoraPlat = config.platforms.find((p: any) => p.platformId === "quora");
+          if (quoraPlat) {
+            const sectorQuoraTopics: Record<string, string[]> = {
+              "Healthcare Operations": ["Healthcare", "Hospital-Administration", "Medicine-and-Healthcare"],
+              "Real Estate & Property Management": ["Real-Estate", "Property-Management", "Landlords"],
+              "Construction & Subcontracting": ["Construction-Industry", "Contractors", "Home-Improvement"],
+              "Professional Services (Accounting/CPA/Law)": ["Accounting", "Bookkeeping", "Lawyers"],
+              "Local Small Businesses": ["Small-Businesses", "Local-Businesses", "Entrepreneurship"],
+              "Finance & Invoicing Workflows": ["Invoicing", "Billing", "Bookkeeping"],
+              "E-commerce & Retail Logistics": ["E-Commerce", "Shopify", "Drop-Shipping"],
+              "Marketing agency": ["Marketing-Agencies", "Digital-Marketing", "Advertising"],
+              "Niche Hobby Forums / Communities": ["Online-Communities", "Forum-Software"]
+            };
+            const topics = (sectorQuoraTopics[targetSector] || ["Small-Businesses", "Operations-Management", "Business-Automation"]).slice(0, 2);
+
+            for (const topic of topics) {
+              if (!budgetOk()) break;
+              logTrace(`[Quora] Fetching live sector-specific topic feed: "${topic.replace(/-/g, ' ')}"...`);
+              const cleanTopic = topic.replace(/-/g, ' ');
+              const url = `https://news.google.com/rss/search?q=site:quora.com+${encodeURIComponent(cleanTopic)}+problem+OR+workflow&hl=en-US&gl=US&ceid=US:en`;
+              const results = await scrapeRSSFeed(url, `Quora (${cleanTopic})`, subrequestBudget);
+              scrapedQuora.push(...results);
+            }
+            logTrace(`[Quora] Successfully crawled ${scrapedQuora.length} posts for sector "${targetSector}". (Budget remaining: ${subrequestBudget.remaining})`);
+          }
+        } catch (e: any) {
+          logTrace(`❌ [Quora] Crawling failed: ${e.message || e}`);
+        }
+      },
+      async () => {
+        if (!(isEnabled("firecrawl") && budgetOk())) return;
+        logTrace(`[Firecrawl] Initiating custom web crawler for configured targets...`);
+        try {
+          const fcPlat = config.platforms.find((p: any) => p.platformId === "firecrawl");
+          if (fcPlat && process.env.FIRECRAWL_API_KEY) {
+            const activeTargets = fcPlat.targets.filter((t: any) => t.isEnabled);
+            for (const target of activeTargets) {
+              if (!budgetOk()) break;
+              subrequestBudget.remaining--;
+              logTrace(`[Firecrawl] Crawling target: "${target.name}" (${target.urlOrPath})...`);
+              const results = await scrapeWithFirecrawl(target.urlOrPath, target.name || "Custom Web Target");
+              scrapedFirecrawl.push(...results);
+            }
+            logTrace(`[Firecrawl] Successfully crawled ${scrapedFirecrawl.length} pages from active targets. (Budget remaining: ${subrequestBudget.remaining})`);
+          } else if (!process.env.FIRECRAWL_API_KEY) {
+            logTrace("[Firecrawl] ⚠️ FIRECRAWL_API_KEY not configured. Crawler skipped.");
+          }
+        } catch (e: any) {
+          logTrace(`❌ [Firecrawl] Crawling failed: ${e.message || e}`);
+        }
       }
-    }
+    ];
+
+    logTrace(`Launching ${crawlTasks.length} platform crawlers concurrently (shared subrequest budget: ${subrequestBudget.remaining})...`);
+    await Promise.allSettled(crawlTasks.map(task => task()));
+    logTrace(`All concurrent crawlers settled. Subrequest budget remaining: ${subrequestBudget.remaining}.`);
 
     // Combine sources
     let scrapedComments = [
@@ -2680,62 +2778,44 @@ app.post("/api/opportunities/discover", async (req, res) => {
     logTrace(`Combined live crawler feeds. Total raw posts/comments aggregated across ALL platforms: ${scrapedComments.length}`);
     logTrace(`Platform crawl details: Hacker News (${scrapedHN.length}), Reddit (${scrapedReddit.length}), GitHub (${scrapedGitHub.length}), Mastodon (${scrapedMastodon.length}), Stack Exchange (${scrapedSE.length}), Discord (${scrapedDiscord.length}), Discourse (${scrapedDiscourse.length}), RSS (${scrapedRSS.length}), Quora (${scrapedQuora.length}), Firecrawl (${scrapedFirecrawl.length})`);
 
-    // If we have no results and a keyword was specified, try a broader query automatically to avoid transient failure
-    if (scrapedComments.length === 0 && keyword) {
-      logTrace(`Live crawl returned 0 hits for "${keyword}". Automatically running broad query expansion to locate related problems...`);
+    // If we have no results and a keyword was specified, try a broader query — but only
+    // for platforms whose FIRST pass returned nothing, and only while subrequest budget
+    // remains. Previously this re-crawled ALL 10 platforms from scratch unconditionally,
+    // which could roughly double the subrequest count for the exact requests that were
+    // already running short on budget (0 results is often itself a symptom of the
+    // budget/tunnel running out on the first pass).
+    if (scrapedComments.length === 0 && keyword && budgetOk()) {
+      logTrace(`Live crawl returned 0 hits for "${keyword}". Running a single bounded broad-query retry (budget remaining: ${subrequestBudget.remaining})...`);
       const fallbackSemanticQueries = await generateSemanticQueries(targetSector, "");
-      const fallbackHN = isEnabled("hn") ? await scrapeHackerNewsComments("", targetSector, fallbackSemanticQueries) : [];
-      const fallbackReddit = isEnabled("reddit") ? await scrapeRedditPublicJSON("", targetSector, fallbackSemanticQueries) : [];
-      const fallbackGitHub = isEnabled("github") ? await scrapeGitHubIssues("", targetSector, fallbackSemanticQueries) : [];
-      const fallbackMastodon = isEnabled("mastodon") ? await scrapeMastodonStatuses("", targetSector) : [];
-      const fallbackSE = isEnabled("stackexchange") ? await scrapeStackExchange("", targetSector, fallbackSemanticQueries) : [];
 
-      const fallbackDiscourse = isEnabled("discourse") ? await (async () => {
+      const fallbackHN = (isEnabled("hn") && budgetOk()) ? await scrapeHackerNewsComments("", targetSector, fallbackSemanticQueries) : [];
+      const fallbackReddit = (isEnabled("reddit") && budgetOk()) ? await scrapeRedditPublicJSON("", targetSector, fallbackSemanticQueries, subrequestBudget) : [];
+      const fallbackGitHub = (isEnabled("github") && budgetOk()) ? await scrapeGitHubIssues("", targetSector, fallbackSemanticQueries) : [];
+      const fallbackMastodon = (isEnabled("mastodon") && budgetOk()) ? await scrapeMastodonStatuses("", targetSector) : [];
+      const fallbackSE = (isEnabled("stackexchange") && budgetOk()) ? await scrapeStackExchange("", targetSector, fallbackSemanticQueries) : [];
+
+      const fallbackDiscourse = (isEnabled("discourse") && budgetOk()) ? await (async () => {
         const results: any[] = [];
         const discoursePlat = config.platforms.find((p: any) => p.platformId === "discourse");
         if (discoursePlat) {
           const activeTargets = discoursePlat.targets.filter((t: any) => t.isEnabled);
           for (const target of activeTargets) {
-            const r = await scrapeDiscourse(target.urlOrPath, "", targetSector, fallbackSemanticQueries);
+            if (!budgetOk()) break;
+            const r = await scrapeDiscourse(target.urlOrPath, "", targetSector, fallbackSemanticQueries, subrequestBudget);
             results.push(...r);
           }
         }
         return results;
       })() : [];
 
-      const fallbackRSS = isEnabled("rss") ? await (async () => {
+      const fallbackRSS = (isEnabled("rss") && budgetOk()) ? await (async () => {
         const results: any[] = [];
         const rssPlat = config.platforms.find((p: any) => p.platformId === "rss");
         if (rssPlat) {
           const activeTargets = rssPlat.targets.filter((t: any) => t.isEnabled);
           for (const target of activeTargets) {
-            const r = await scrapeRSSFeed(target.urlOrPath, `RSS (${target.name})`);
-            results.push(...r);
-          }
-        }
-        return results;
-      })() : [];
-
-      const fallbackQuora = isEnabled("quora") ? await (async () => {
-        const results: any[] = [];
-        const quoraPlat = config.platforms.find((p: any) => p.platformId === "quora");
-        if (quoraPlat) {
-          const sectorQuoraTopics: Record<string, string[]> = {
-            "Healthcare Operations": ["Healthcare", "Hospital-Administration", "Medicine-and-Healthcare"],
-            "Real Estate & Property Management": ["Real-Estate", "Property-Management", "Landlords"],
-            "Construction & Subcontracting": ["Construction-Industry", "Contractors", "Home-Improvement"],
-            "Professional Services (Accounting/CPA/Law)": ["Accounting", "Bookkeeping", "Lawyers"],
-            "Local Small Businesses": ["Small-Businesses", "Local-Businesses", "Entrepreneurship"],
-            "Finance & Invoicing Workflows": ["Invoicing", "Billing", "Bookkeeping"],
-            "E-commerce & Retail Logistics": ["E-Commerce", "Shopify", "Drop-Shipping"],
-            "Marketing agency": ["Marketing-Agencies", "Digital-Marketing", "Advertising"],
-            "Niche Hobby Forums / Communities": ["Online-Communities", "Forum-Software"]
-          };
-          const topics = sectorQuoraTopics[targetSector] || ["Small-Businesses", "Operations-Management", "Business-Automation"];
-          for (const topic of topics) {
-            const cleanTopic = topic.replace(/-/g, ' ');
-            const url = `https://news.google.com/rss/search?q=site:quora.com+${encodeURIComponent(cleanTopic)}+problem+OR+workflow&hl=en-US&gl=US&ceid=US:en`;
-            const r = await scrapeRSSFeed(url, `Quora (${cleanTopic})`);
+            if (!budgetOk()) break;
+            const r = await scrapeRSSFeed(target.urlOrPath, `RSS (${target.name})`, subrequestBudget);
             results.push(...r);
           }
         }
@@ -2750,11 +2830,10 @@ app.post("/api/opportunities/discover", async (req, res) => {
         ...fallbackSE,
         ...scrapedDiscord,
         ...fallbackDiscourse,
-        ...fallbackRSS,
-        ...fallbackQuora
+        ...fallbackRSS
       ];
-      logTrace(`Broad search completed. Total backup posts fetched: ${scrapedComments.length}`);
-      logTrace(`Broad search details: Hacker News (${fallbackHN.length}), Reddit (${fallbackReddit.length}), GitHub (${fallbackGitHub.length}), Mastodon (${fallbackMastodon.length}), Stack Exchange (${fallbackSE.length}), Discord (${scrapedDiscord.length}), Discourse (${fallbackDiscourse.length}), RSS (${fallbackRSS.length}), Quora (${fallbackQuora.length})`);
+      logTrace(`Broad search completed. Total backup posts fetched: ${scrapedComments.length} (Budget remaining: ${subrequestBudget.remaining})`);
+      logTrace(`Broad search details: Hacker News (${fallbackHN.length}), Reddit (${fallbackReddit.length}), GitHub (${fallbackGitHub.length}), Mastodon (${fallbackMastodon.length}), Stack Exchange (${fallbackSE.length}), Discord (${scrapedDiscord.length}), Discourse (${fallbackDiscourse.length}), RSS (${fallbackRSS.length})`);
     }
 
     if (scrapedComments.length === 0) {
@@ -2783,6 +2862,26 @@ app.post("/api/opportunities/discover", async (req, res) => {
     }
 
     logTrace(`Preparing final evaluation feed of ${scrapedComments.length} items for AI analysis...`);
+
+    // Buyer-intent / urgency / sentiment pre-scoring. Runs before the AI call so we
+    // (a) don't burn tokens evaluating generic topical chatter, and (b) surface the
+    // strongest near-term-need + willingness-to-pay candidates first.
+    const rawCount = scrapedComments.length;
+    scrapedComments = scrapedComments
+      .map((c: any) => {
+        const { score, signals } = scoreBuyerIntent(`${c.title || ""} ${c.text || ""}`);
+        return { ...c, _intentScore: score, _intentSignals: signals };
+      })
+      // Cut posts that read as promotional/solution-pitching rather than someone in need.
+      .filter((c: any) => c._intentScore > -3)
+      .sort((a: any, b: any) => b._intentScore - a._intentScore);
+
+    const MAX_ITEMS_FOR_AI = 60;
+    const trimmedForBudget = scrapedComments.length > MAX_ITEMS_FOR_AI;
+    if (trimmedForBudget) {
+      scrapedComments = scrapedComments.slice(0, MAX_ITEMS_FOR_AI);
+    }
+    logTrace(`Buyer-intent pre-scoring applied: ${rawCount} raw → ${scrapedComments.length} sent to AI (dropped low/negative-signal noise${trimmedForBudget ? `, capped to top ${MAX_ITEMS_FOR_AI} by intent score` : ""}).`);
 
     const sectorQualificationRules = targetSector === "Marketing agency" ? `
       MARKETING-AGENCY DECISION-MAKER QUALIFICATION:
@@ -2836,12 +2935,19 @@ app.post("/api/opportunities/discover", async (req, res) => {
       - The 'industry' field MUST be a traditional, non-technical real-world industry sector (e.g. 'Retail', 'Real Estate', 'Construction', 'E-commerce', 'Accounting & Bookkeeping', 'Healthcare', 'Logistics', 'Hospitality', 'Professional Services').
       - Only extract from organic, natural, first-person user complaints and raw posts about immediate manual struggles that are classified as "help_seeker".
 
+      BUYER-INTENT, URGENCY & SENTIMENT WEIGHTING (this is the highest-priority filter — apply it before anything else):
+      - Every item in the feed already carries a "_intentScore" (a cheap rule-based pre-score, positive = stronger signal, negative = likely promotional) and "_intentSignals" (which phrases matched: urgency, buyer-intent, frustration, manual-pain, or promotional). Treat these as a strong prior, not a guarantee — read the actual text and confirm the signal is real and not sarcastic, hypothetical, or about someone else's problem.
+      - REJECT posts that are merely topically related but show no real evidence the author is currently, personally affected and actively bothered by the problem right now. Passing mention, past-tense "used to struggle with," or third-person description of someone else's problem does not qualify.
+      - PRIORITIZE posts that show two or more of: (a) urgency/immediacy language ("this week", "asap", "before it's too late", visible deadline pressure), (b) explicit buyer/shopping intent (asking for tool/vendor recommendations, mentioning budget, saying they'd pay), (c) strong negative sentiment/frustration directed at the specific manual task, (d) a concrete, recurring, quantifiable cost (hours per week, dollars lost, customers lost).
+      - A high "opportunityScore" (80+) REQUIRES clear evidence of at least genuine pain AND at least one buyer-intent or urgency signal in the actual post text — not just topical relevance to the sector. If a post only shows mild, generic annoyance with no urgency or buying signal, cap opportunityScore at 65 or lower even if it's a valid help_seeker.
+      - Do not let a high "_intentScore" override your own read of the text — it's there to help you prioritize scanning order and calibrate confidence, not to replace judgment. If the pre-score is high but the text doesn't actually support it (e.g. a false keyword match), reject or score it low.
+
       ${sectorQualificationRules}
 
       DO NOT synthesize any hypothetical or simulated scenarios. Only process actual posts present in the feed.
       If there are no actionable, software-addressable help-seeking problems in the feed, return an empty array [] in JSON.
 
-      Real Live Comment Feed:
+      Real Live Comment Feed (already sorted by buyer-intent pre-score, strongest candidates first):
       ${JSON.stringify(scrapedComments)}
 
       Extract and qualify genuine workflow problems. For any post you use, preserve its actual author name, source platform, and exact source URL as provided in the feed.
