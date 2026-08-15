@@ -118,6 +118,7 @@ export default function PacOverlay({
     localStorage.setItem("PAC_SPEAKER_MUTED", isSpeakerMuted.toString());
   }, [isSpeakerMuted]);
   const isSpeakerMutedRef = useRef<boolean>(isSpeakerMuted);
+  const ignoreAudioRef = useRef(false);
   useEffect(() => {
     isSpeakerMutedRef.current = isSpeakerMuted;
   }, [isSpeakerMuted]);
@@ -501,6 +502,43 @@ export default function PacOverlay({
     if (text.includes("[ACTION: RUN_DIAGNOSTICS]") || /\[ACTION:\s*RUN_DIAGNOSTICS\]/i.test(text) || /(?:run|check)\s+(?:a\s+)?(?:subsystem\s+|abilities\s+|ability\s+|full\s+)?(?:check|diagnostics)/i.test(text)) {
       runDiagnosticsCheck();
       setComputerLogs(prev => [...prev, "[P.A.C. DIAGNOSTICS] Executed full subsystem abilities self-check."]);
+    }
+
+    // 0d. Trigger Scraper Sweep Action Tag
+    if (text.includes("[ACTION: TRIGGER_SWEEP]") || /\[ACTION:\s*TRIGGER_SWEEP\]/i.test(text)) {
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📡 Voice request to run crawler sweeps detected.`]);
+      apiFetch("/api/bot-config/trigger-sweep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      }).then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          const count = data.foundOpps ? data.foundOpps.length : 0;
+          onRefreshOpportunities?.();
+          setComputerLogs(prev => [...prev, `[P.A.C. ACTION] Sweep complete! Found ${count} new opportunities.`]);
+        }
+      }).catch(err => {
+        console.error("Failed to run sweep via action tag:", err);
+      });
+    }
+
+    // 0e. Local Command Execution Action Tag
+    const execMatch = text.match(/\[ACTION:\s*EXECUTE_LOCAL:\s*([^\]]+)\]/i);
+    if (execMatch) {
+      const command = execMatch[1].trim();
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🖥️ Voice request to execute local command: "${command}"`]);
+      apiFetch("/api/bot-config/execute-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command })
+      }).then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setComputerLogs(prev => [...prev, `[P.A.C. ACTION] Command complete! stdout: ${data.stdout?.substring(0, 60) || "none"}`]);
+        }
+      }).catch(err => {
+        console.error("Failed to execute local command via action tag:", err);
+      });
     }
 
     // 1. Check for memory updates
@@ -893,7 +931,7 @@ export default function PacOverlay({
   };
 
   const playPcmChunk = async (data: Blob | ArrayBuffer) => {
-    if (isSpeakerMutedRef.current) return;
+    if (isSpeakerMutedRef.current || ignoreAudioRef.current) return;
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       audioCtxRef.current = ctx;
@@ -1820,6 +1858,7 @@ This will automatically update your database and notes so you do not forget them
               setPacStatus("idle");
               setComputerLogs(prev => [...prev, `[DEEPGRAM-AGENT-ERR] ${msg.description || msg.message || "Voice Agent Error"}`]);
             } else if (msg.type === "AgentMessage" || (msg.type === "ConversationText" && msg.role === "assistant")) {
+              ignoreAudioRef.current = false;
               const text = msg.transcript || msg.content;
               if (text && text.trim()) {
                 assistantAccumulatedTextRef.current += " " + text;
@@ -1862,6 +1901,7 @@ This will automatically update your database and notes so you do not forget them
               }
             } else if (msg.type === "UserStartedSpeaking" || msg.type === "SpeechStarted") {
               stopStreamingPlayback();
+              ignoreAudioRef.current = true;
               setPacStatus("listening");
               setComputerLogs(prev => [...prev, "[DEEPGRAM-VAD] Human voice detected speaking..."]);
 
@@ -1877,6 +1917,7 @@ This will automatically update your database and notes so you do not forget them
               setPacStatus("thinking");
             } else if (msg.type === "Interrupted" || msg.type === "interrupted") {
               stopStreamingPlayback();
+              ignoreAudioRef.current = true;
               setPacStatus("listening");
               setComputerLogs(prev => [...prev, "[DEEPGRAM-BARGE] Interrupted: Speaker stopped, listening..."]);
             } else if (msg.type === "AgentAudioDone" || msg.type === "ConversationCompleted") {
