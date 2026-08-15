@@ -303,8 +303,37 @@ let llmConfig = {
   useSlingshot: true
 };
 
-// Helper to fetch via G14 Slingshot residential proxy or direct fetch fallback
-async function fetchWithSlingshot(url: string, options?: RequestInit): Promise<Response> {
+// ==========================================
+// Subrequest budget guard (Cloudflare Workers caps outbound fetches per invocation:
+// 50 on Free, 1000 on Bundled/Paid). Every path that fires an outbound fetch —
+// tunnel attempts included — must go through consumeSubrequestBudget() first, or a
+// single discovery sweep can silently multiply 1 logical crawl into 2-3 real
+// subrequests (Mac tunnel attempt + G14 tunnel attempt + direct fallback) and blow
+// past the cap before the AI call even runs.
+// ==========================================
+interface SubrequestBudget {
+  remaining: number;
+  tunnelDead: { mac: boolean; g14: boolean };
+}
+
+function createSubrequestBudget(max: number): SubrequestBudget {
+  return { remaining: max, tunnelDead: { mac: false, g14: false } };
+}
+
+function consumeSubrequestBudget(budget: SubrequestBudget | undefined, label: string): boolean {
+  if (!budget) return true; // no budget passed = uncapped (used by non-discovery code paths)
+  if (budget.remaining <= 0) {
+    console.warn(`[Subrequest Budget] Exhausted. Skipping fetch for: ${label}`);
+    return false;
+  }
+  budget.remaining--;
+  return true;
+}
+
+// Helper to fetch via G14 Slingshot residential proxy or direct fetch fallback.
+// Pass a SubrequestBudget from the calling discovery sweep so this respects the
+// shared cap instead of firing tunnel-then-tunnel-then-direct unconditionally.
+async function fetchWithSlingshot(url: string, options?: RequestInit, budget?: SubrequestBudget): Promise<Response> {
   const macUrl = (llmConfig.crawlerTunnelUrl || process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "").trim().replace(/\/$/, "");
   const g14Url = (llmConfig.g14TunnelUrl || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
   
