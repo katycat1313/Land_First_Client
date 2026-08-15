@@ -1114,7 +1114,7 @@ export default function PacOverlay({
 
       const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
       // Connect DIRECTLY to Deepgram's Conversational Voice Agent API to bypass proxy latency
-      const wsUrl = `wss://agent.deepgram.com/v1/agent/converse?encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "");
+      const wsUrl = `wss://agent.deepgram.com/v1/agent/converse?encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000&eager_eot_threshold=0.4&eot_threshold=0.7` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "");
 
       const ws = new WebSocket(wsUrl, ["token", tempToken]);
       ws.binaryType = "arraybuffer";
@@ -1172,10 +1172,12 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
 - NEVER PITCH IMPOSSIBLE SCOPE: Never sell overly complex low-level engineering that AI agents and human supervision cannot ship smoothly.
 
 [DUAL-DEMEANOR PROTOCOL: CO-FOUNDER vs. PROSPECT]
-1. INTERNAL CO-FOUNDER DEMEANOR (Talking directly to your partner / the user):
-   - "Cut the BS", direct, straight-shooting, candid, and high-energy equal business partner.
-   - PUSH BACK on weak strategy, underpriced deals, or procrastination.
-   - BE PROACTIVE: Do not wait around to be asked! Actively prod your partner in voice chat: "Hey, stop sitting on these leads—I generated high-value thought-leadership posts for Reddit and LinkedIn. Pick one right now and hit 1-Click Post so we can land Client #1 today!"
+1. INTERNAL CO-FOUNDER DEMEANOR (Smart-Alec, Hard-Core Business Partner):
+   - You are a smart-alec, hard-core, high-energy business partner who drives results, not a polite assistant. Call out any stalling immediately.
+   - NO OPTION PARALYSIS: Never ask the user to choose between multiple options, and never ask "what do you want to do?". The user gets sidetracked when forced to choose or build outreach from scratch.
+   - PUSH AND EXECUTE: You must proactively pick the single best opportunity from the pipeline yourself, explain why it's the winner, and IMMEDIATELY draft the outreach message or email.
+   - INSTRUCT ACTION: Present the draft and command action: "Look at lead #opp_id. I picked them because they have active cash flow but high pain. I already drafted this outreach. Read it, inject your personality, and let's send it right now. No sidetracking, no excuses."
+   - CALL OUT PROXY WORK: If the user is overthinking, editing settings, or looking at dashboards instead of reaching out, call it out directly: "We are here to land clients, not stare at buttons. I built the draft, you make it pretty, we send it. Let's go."
 
 2. EXTERNAL PROSPECT DEMEANOR (Drafting replies, outreach, and public posts):
    - Warm, down-to-earth, natural, conversational human voice—speaking off-the-cuff like an authentic founder.
@@ -1209,22 +1211,25 @@ Authentic Value: Sell by diagnosing pain, not pushing features.
 You are the strict gatekeeper of my pipeline. When analyzing opportunities in the database via list_opportunities or custom scans, evaluate leads using these criteria:
 1. Commercial Solvency: Only target businesses with active revenue. Eliminate pre-revenue bootstrappers, students, or hobbyists with zero budget. We target $1,000-$3,000 solution fees.
 2. High-Value Pain: A lead is only worth pursuing if the prospect describes a concrete current business problem, failed process, manual workflow (e.g. manual spreadsheets, lost leads, missed calls, manual CSV cleanup), or active search for recommendations/services.
-3. Outspoken Advocacy: Actively recommend the highest-quality leads. Do not just ask what the user wants to do; analyze the list, identify the top 2-3 most solvent and high-pain opportunities, and pitch them proactively to your partner.
+3. SINGLE LEAD ADVOCACY: Pick the SINGLE best lead from the pipeline. Do not offer choices. Tell the user exactly which lead to target and present the drafted outreach immediately.
 
 [INTERACTION STYLE & ETHICS]
 Coach & Spar: Roleplay sales calls with me. Critically evaluate my pitches.
 Ethical Guardrails: Operate with uncompromising ethics.
 
 [UI ACTION TAGS & APPLICATION CONTROL]
-Whenever you refer to a specific page or section in the app, or want to pull up a problem/opportunity card on screen, or run a check on your abilities, invoke the corresponding tool function or include the action tag:
+Whenever you refer to a specific page or section in the app, or want to pull up a problem/opportunity card on screen, run a check on your abilities, execute crawler runs, or execute local shell commands (like triggering OpenClaw scripts), invoke the corresponding tool function or include the action tag:
 - Navigate App Views: Call function 'navigate_view' OR include '[ACTION: NAVIGATE: board]' (or crm, memory, bots, partner, learning)
 - Pull Up Problem / Opportunity Card: Call function 'pull_up_card' or 'open_opportunity' OR include '[ACTION: OPEN_OPPORTUNITY: <id_or_keyword>]'
 - Run Subsystem Abilities Check: Call function 'run_diagnostics' OR include '[ACTION: RUN_DIAGNOSTICS]'
+- Trigger Fleet Lead Sweep: Call function 'trigger_lead_sweep' OR include '[ACTION: TRIGGER_SWEEP]'
+- Run Local Command / OpenClaw: Call function 'execute_local_command' OR include '[ACTION: EXECUTE_LOCAL: <command>]'
 
 [CONSTRUCTIVE DEBATE & NON-YES-MAN MANDATE]
 YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN FROM BEING A PASSIVE YES-MAN.
 - If your partner (the user) proposes a weak strategy, underpriced quote, target with no budget, or impractical feature, YOU MUST PUSH BACK DIRECTLY AND CANDIDLY.
 - Explain *why* you disagree, provide a stronger counter-proposal, and engage in constructive debate.
+- Be loud, opinionated, and run the pipeline!
 
 [CONVERSATIONAL CONTINUITY, INITIALIZATION & RE-ACTIVATION DIRECTIVE]
 - IMMEDIATELY on connecting, analyze the opportunities list provided below. Identify the absolute best lead(s) for client acquisition (focusing on nimble local micro-businesses like HVAC, plumbers, real estate, boutique agencies, etc. with active revenue and high pain) and tell your partner straight up who is perfect to outreach, why, and what MVP solution we should build.
@@ -1239,11 +1244,11 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
 
 [CURRENT ACTIVE PIPELINE / OPPORTUNITIES]
 Use this list of active leads to inform your advice or outreach suggestions:
-${JSON.stringify(opportunities || [], null, 2)}
+${JSON.stringify((opportunities || []).map(o => ({ id: o.id, title: o.title, industry: o.industry, painLevel: o.painLevel, score: o.opportunityScore, status: o.status || "Saved" })), null, 2)}
 
 [COMPUTER USE & AUTONOMOUS CAMPAIGN EXECUTION LOGS]
-Use these logs to understand what actions you or your autonomous sub-agents have completed:
-${JSON.stringify(computerLogs || [], null, 2)}
+Use these logs to understand what actions you or your autonomous sub-agents have completed (last 10 entries):
+${JSON.stringify((computerLogs || []).slice(-10), null, 2)}
 
 [AGENT MEMORY & PERSISTENT CONTEXT]
 Below is your persistent memory from prior conversations. You MUST use this to remember pending tasks and follow-ups:
@@ -1284,7 +1289,9 @@ This will automatically update your database and notes so you do not forget them
                 provider: {
                   type: "deepgram",
                   model: "flux-general-en",
-                  version: "v2"
+                  version: "v2",
+                  eot_threshold: 0.7,
+                  eager_eot_threshold: 0.4
                 }
               },
               think: {
@@ -1381,6 +1388,32 @@ This will automatically update your database and notes so you do not forget them
                         }
                       },
                       required: ["opportunity_id"]
+                    }
+                  },
+                  {
+                    name: "trigger_lead_sweep",
+                    description: "Triggers the bot fleet crawlers to sweep all configured platforms (Reddit, Discourse, RSS, Firecrawl, etc.) for new business opportunities.",
+                    parameters: {
+                      type: "object",
+                      properties: {}
+                    }
+                  },
+                  {
+                    name: "execute_local_command",
+                    description: "Runs a shell command locally on the user's computer via the Slingshot bridge (e.g., executing a python or JS script like OpenClaw, building software, checking file contents).",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        command: {
+                          type: "string",
+                          description: "The exact shell command to run on the local machine."
+                        },
+                        cwd: {
+                          type: "string",
+                          description: "The directory to run the command in (optional)."
+                        }
+                      },
+                      required: ["command"]
                     }
                   }
                 ]
@@ -1490,6 +1523,49 @@ This will automatically update your database and notes so you do not forget them
                 await runDiagnosticsCheck();
                 responseOutput = `Subsystem self-diagnostics completed. Tested all 5 core subsystems: Deepgram Voice (OK), Gemini Chat (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK). All operational.`;
                 setComputerLogs(prev => [...prev, `[DEEPGRAM-TOOL] P.A.C. executed full diagnostics self-check.`]);
+              } else if (funcName === "trigger_lead_sweep") {
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Triggering active lead sweep across configured platforms...`]);
+                try {
+                  const res = await apiFetch("/api/bot-config/trigger-sweep", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" }
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    const foundCount = data.foundOpps ? data.foundOpps.length : 0;
+                    onRefreshOpportunities?.();
+                    responseOutput = `Lead sweep completed. Found ${foundCount} new opportunities.`;
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Sweep complete! Found ${foundCount} new opportunities.`]);
+                  } else {
+                    responseOutput = `Lead sweep failed: HTTP ${res.status}`;
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed with HTTP status ${res.status}`]);
+                  }
+                } catch (err: any) {
+                  responseOutput = `Lead sweep failed: ${err.message || err}`;
+                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed: ${err.message || err}`]);
+                }
+              } else if (funcName === "execute_local_command") {
+                const cmd = rawArgs.command;
+                const cwd = rawArgs.cwd;
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🖥️ Running local command: "${cmd}"...`]);
+                try {
+                  const res = await apiFetch("/api/bot-config/execute-local", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ command: cmd, cwd })
+                  });
+                  const data = await res.json();
+                  if (res.ok && data.success !== false) {
+                    responseOutput = `Command executed successfully. stdout: ${data.stdout || "none"}, stderr: ${data.stderr || "none"}`;
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Command complete! stdout: ${data.stdout?.substring(0, 60) || "none"}`]);
+                  } else {
+                    responseOutput = `Command failed: ${data.error || data.stderr || "unknown error"}`;
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command failed: ${data.error || data.stderr || "unknown"}`]);
+                  }
+                } catch (err: any) {
+                  responseOutput = `Command failed: ${err.message || err}`;
+                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command execution error: ${err.message}`]);
+                }
               }
 
               if (callId) {
@@ -1656,6 +1732,79 @@ This will automatically update your database and notes so you do not forget them
                       }));
                     }
                   }
+                } else if (call.name === "trigger_lead_sweep") {
+                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Triggering active lead sweep across configured platforms...`]);
+                  try {
+                    const res = await apiFetch("/api/bot-config/trigger-sweep", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" }
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      const foundCount = data.foundOpps ? data.foundOpps.length : 0;
+                      onRefreshOpportunities?.();
+                      setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Sweep complete! Found ${foundCount} new opportunities.`]);
+                      
+                      if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                        dgSocketRef.current.send(JSON.stringify({
+                          type: "FunctionCallResponse",
+                          id: call.id,
+                          name: "trigger_lead_sweep",
+                          content: JSON.stringify({ success: true, message: `Lead sweep completed. Found ${foundCount} opportunities.`, details: data.logs || [] })
+                        }));
+                      }
+                    } else {
+                      throw new Error(`Sweep returned status ${res.status}`);
+                    }
+                  } catch (err: any) {
+                    console.error("Failed to run lead sweep via tool:", err);
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed: ${err.message || err}`]);
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "FunctionCallResponse",
+                        id: call.id,
+                        name: "trigger_lead_sweep",
+                        content: JSON.stringify({ success: false, error: err.message || "Failed to trigger sweep." })
+                      }));
+                    }
+                  }
+                } else if (call.name === "execute_local_command") {
+                   const cmdArgs = JSON.parse(call.arguments || "{}");
+                   const cmd = cmdArgs.command;
+                   const cwd = cmdArgs.cwd;
+                   setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🖥️ Running local command: "${cmd}"...`]);
+                   try {
+                     const res = await apiFetch("/api/bot-config/execute-local", {
+                       method: "POST",
+                       headers: { "Content-Type": "application/json" },
+                       body: JSON.stringify({ command: cmd, cwd })
+                     });
+                     const data = await res.json();
+                     if (res.ok && data.success !== false) {
+                       setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Command complete! stdout: ${data.stdout?.substring(0, 60) || "none"}`]);
+                       if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                         dgSocketRef.current.send(JSON.stringify({
+                           type: "FunctionCallResponse",
+                           id: call.id,
+                           name: "execute_local_command",
+                           content: JSON.stringify({ success: true, stdout: data.stdout, stderr: data.stderr })
+                         }));
+                       }
+                     } else {
+                       throw new Error(data.error || data.stderr || "Command execution failed.");
+                     }
+                   } catch (err: any) {
+                     console.error("Failed to execute command via tool:", err);
+                     setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command failed: ${err.message || err}`]);
+                     if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                       dgSocketRef.current.send(JSON.stringify({
+                         type: "FunctionCallResponse",
+                         id: call.id,
+                         name: "execute_local_command",
+                         content: JSON.stringify({ success: false, error: err.message || "Failed to execute command." })
+                       }));
+                     }
+                   }
                 }
               }
             } else if (msg.type === "SystemNotice") {

@@ -75,6 +75,35 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Local LLM Relay / Proxy endpoint: POST /ollama
+  if (parsedUrl.pathname === "/ollama" || parsedUrl.pathname.startsWith("/ollama/")) {
+    const targetPath = parsedUrl.pathname.replace(/^\/ollama/, "") || "/api/chat";
+    const localOllamaUrl = `http://localhost:11434${targetPath}`;
+    console.log(`[G14 Slingshot] 🤖 Relaying LLM request (${req.method}) to local Ollama: ${localOllamaUrl}`);
+
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const response = await fetch(localOllamaUrl, {
+          method: req.method,
+          headers: { "Content-Type": "application/json" },
+          body: req.method !== "GET" && req.method !== "HEAD" ? body : undefined
+        });
+
+        const responseText = await response.text();
+        res.writeHead(response.status, { "Content-Type": "application/json" });
+        res.end(responseText);
+        console.log(`[G14 Slingshot] 🤖 Relayed response from local Ollama (Status: ${response.status})`);
+      } catch (err) {
+        console.error(`[G14 Slingshot] ❌ Local Ollama relay error:`, err.message);
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Local Ollama is offline or unreachable.", details: err.message }));
+      }
+    });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Endpoint not found. Use /health or /proxy?url=<TARGET_URL>" }));
 });

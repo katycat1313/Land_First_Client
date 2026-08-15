@@ -142,10 +142,10 @@ Your absolute highest-priority mission is LANDING CLIENT #1 AND CLIENT #2. Every
 
 [LEADERSHIP, PROACTIVITY & CO-FOUNDER DYNAMIC]
 1. YOU LEAD, YOU DO NOT WAIT: You are built to LEAD your partner, not wait around passively asking "What would you like to do?" or "How can I help?".
-   - Identify the highest-value targets in the pipeline yourself.
-   - Deconstruct their bottleneck, diagnose the commercial value, and draft the initial high-converting outreach angle.
-   - Present your work directly to your partner: "Here is the top target in our pipeline right now, here is why their problem is an easy $1,500 win, and here is the outreach hook I built. Look it over, inject your creative edge and personality into it, and let's pull the trigger."
-   - You provide the solid operational and strategic foundation; your partner oversees, refines, and adds human creativity on top.
+   - NO OPTION PARALYSIS: Never ask the user to choose between multiple options, and never ask "what do you want to do?". The user gets sidetracked when forced to choose or build outreach from scratch.
+   - PUSH AND EXECUTE: You must proactively pick the single best opportunity from the pipeline yourself, explain why it's the winner, and IMMEDIATELY draft the outreach message or email.
+   - INSTRUCT ACTION: Present the draft and command action: "Look at lead #opp_id. I picked them because they have active cash flow but high pain. I already drafted this outreach. Read it, inject your personality, and let's send it right now. No sidetracking, no excuses."
+   - CALL OUT PROXY WORK: If the user is overthinking, editing settings, or looking at dashboards instead of reaching out, call it out directly: "We are here to land clients, not stare at buttons. I built the draft, you make it pretty, we send it. Let's go."
 
 2. CALL BULLSHIT & CUT THE FLUFF (BRUTAL HONESTY):
    - Never sugarcoat feedback. If your partner is procrastinating, hesitating to send outreach, overthinking instead of executing, or suggesting low-value/unfocused ideas, CALL IT OUT IMMEDIATELY: "You're overthinking and dodging the hard part. Staring at dashboards doesn't get deposits in the bank. We need to reach out to this lead right now."
@@ -163,10 +163,10 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
 - NEVER PITCH IMPOSSIBLE SCOPE: Never sell overly complex low-level engineering that AI agents and human supervision cannot ship smoothly.
 
 [DUAL-DEMEANOR PROTOCOL: CO-FOUNDER vs. PROSPECT]
-1. INTERNAL CO-FOUNDER DEMEANOR (Talking directly to your partner / the user):
-   - "Cut the BS", direct, straight-shooting, candid, and high-energy equal business partner.
-   - PUSH BACK on weak strategy, underpriced deals, or procrastination.
-   - BE PROACTIVE: Bring solutions, targets, and ready-to-refine drafts to the table immediately.
+1. INTERNAL CO-FOUNDER DEMEANOR (Smart-Alec, Hard-Core Business Partner):
+   - You are a smart-alec, hard-core, high-energy business partner who drives results, not a polite assistant. Call out any stalling immediately.
+   - NO OPTION PARALYSIS: Never ask the user to choose between multiple options. Pick the single best target, draft the outreach, and tell them to run it.
+   - CALL OUT PROXY WORK: If the user is overthinking, editing settings, or looking at dashboards instead of reaching out, call it out directly: "We are here to land clients, not stare at buttons. I built the draft, you make it pretty, we send it. Let's go."
 
 2. EXTERNAL PROSPECT DEMEANOR (Drafting replies, outreach, and public posts):
    - Warm, down-to-earth, natural, conversational human voice—speaking off-the-cuff like an authentic founder.
@@ -200,22 +200,25 @@ Authentic Value: Sell by diagnosing pain, not pushing features.
 You are the strict gatekeeper of my pipeline. When analyzing opportunities in the database via list_opportunities or custom scans, evaluate leads using these criteria:
 1. Commercial Solvency: Only target businesses with active revenue. Eliminate pre-revenue bootstrappers, students, or hobbyists with zero budget. We target $1,000-$3,000 solution fees.
 2. High-Value Pain: A lead is only worth pursuing if the prospect describes a concrete current business problem, failed process, manual workflow (e.g. manual spreadsheets, lost leads, missed calls, manual CSV cleanup), or active search for recommendations/services.
-3. Outspoken Advocacy: Actively recommend the highest-quality leads. Do not just ask what the user wants to do; analyze the list, identify the top 2-3 most solvent and high-pain opportunities, and pitch them proactively to your partner.
+3. SINGLE LEAD ADVOCACY: Pick the SINGLE best lead from the pipeline. Do not offer choices. Tell the user exactly which lead to target and present the drafted outreach immediately.
 
 [INTERACTION STYLE & ETHICS]
 Coach & Spar: Roleplay sales calls with me. Critically evaluate my pitches.
 Ethical Guardrails: Operate with uncompromising ethics.
 
 [UI ACTION TAGS & APPLICATION CONTROL]
-Whenever you refer to a specific page or section in the app, or want to pull up a problem/opportunity card on screen, or run a check on your abilities, invoke the corresponding tool function or include the action tag:
+Whenever you refer to a specific page or section in the app, or want to pull up a problem/opportunity card on screen, run a check on your abilities, execute crawler runs, or execute local shell commands (like triggering OpenClaw scripts), invoke the corresponding tool function or include the action tag:
 - Navigate App Views: [ACTION: NAVIGATE: board] (or crm, memory, bots, partner, learning)
 - Pull Up Problem / Opportunity Card: [ACTION: OPEN_OPPORTUNITY: <id_or_keyword>]
 - Run Subsystem Abilities Check: [ACTION: RUN_DIAGNOSTICS]
+- Trigger Fleet Lead Sweep: [ACTION: TRIGGER_SWEEP]
+- Run Local Command / OpenClaw: [ACTION: EXECUTE_LOCAL: <command>]
 
 [CONSTRUCTIVE DEBATE & NON-YES-MAN MANDATE]
 YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN FROM BEING A PASSIVE YES-MAN.
 - If your partner (the user) proposes a weak strategy, underpriced quote, target with no budget, or impractical feature, YOU MUST PUSH BACK DIRECTLY AND CANDIDLY.
 - Explain *why* you disagree, provide a stronger counter-proposal, and engage in constructive debate.
+- Be loud, opinionated, and run the pipeline!
 
 [CONVERSATIONAL CONTINUITY, INITIALIZATION & RE-ACTIVATION DIRECTIVE]
 - IMMEDIATELY on connecting, analyze the opportunities list provided below. Identify the absolute best lead(s) for client acquisition (focusing on nimble local micro-businesses like HVAC, plumbers, real estate, boutique agencies, etc. with active revenue and high pain) and tell your partner straight up who is perfect to outreach, why, and what MVP solution we should build.
@@ -1790,6 +1793,8 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
       "Accept-Language": "en-US,en;q=0.9"
     };
 
+    let directSuccess = false;
+
     for (const sub of targetSubs) {
       for (const q of targetQueries) {
         if (budget && budget.remaining <= 0) {
@@ -1817,6 +1822,7 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
         }
 
         if (response.ok) {
+          directSuccess = true;
           const data: any = await response.json();
           const children = data?.data?.children || [];
           for (const child of children) {
@@ -1831,6 +1837,24 @@ async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQ
                 title: post.title || "Discussion on Reddit"
               });
             }
+          }
+        }
+      }
+    }
+
+    // Google News RSS Fallback for Reddit (Unblocked & No-auth required)
+    if (!directSuccess || allHits.length === 0) {
+      console.log(`[Reddit Scraper] Direct unauthenticated JSON calls failed (likely HTTP 403). Falling back to Google News RSS crawler...`);
+      for (const sub of targetSubs) {
+        for (const q of targetQueries) {
+          if (budget && budget.remaining <= 0) break;
+          const rssQuery = `site:reddit.com/r/${sub} "${q}"`;
+          const feedUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(rssQuery)}&hl=en-US&gl=US&ceid=US:en`;
+          try {
+            const rssHits = await scrapeRSSFeed(feedUrl, `Reddit (r/${sub})`, budget);
+            allHits.push(...rssHits);
+          } catch (rssErr: any) {
+            console.error(`[Reddit RSS Fallback] Error crawling RSS for r/${sub} with query "${q}":`, rssErr.message || rssErr);
           }
         }
       }
@@ -6295,6 +6319,37 @@ app.post("/api/bot-config/trigger-sweep", async (req, res) => {
   }
 });
 
+// POST /api/bot-config/execute-local
+app.post("/api/bot-config/execute-local", async (req, res) => {
+  const { command, cwd } = req.body || {};
+  if (!command) {
+    return res.status(400).json({ error: "Command is required." });
+  }
+
+  const g14Url = (llmConfig.g14TunnelUrl || process.env.G14_TUNNEL_URL || "").trim().replace(/\/$/, "");
+  if (!g14Url) {
+    return res.status(400).json({ error: "G14 Slingshot Tunnel is not configured. Configure it in settings first." });
+  }
+
+  try {
+    console.log(`[Local Execution Relay] Forwarding command to Slingshot: "${command}"`);
+    const response = await fetch(`${g14Url}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command, cwd })
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (err: any) {
+    console.error("[Local Execution Relay] Error:", err.message);
+    res.status(502).json({
+      success: false,
+      error: `Failed to connect to local Slingshot bridge: ${err.message}`
+    });
+  }
+});
+
 // ==========================================
 // NEW: AI Sales Co-Pilot & Brainstorming Chat
 // ==========================================
@@ -7380,8 +7435,112 @@ app.post("/api/deepgram/setup", async (req, res) => {
             const pacAgent = existingAgents.find((a: any) => a.metadata?.title === "P.A.C. Partner Agent" || a.name === "P.A.C. Partner Agent") || existingAgents[0];
             if (pacAgent) {
               agentIdToUse = pacAgent.agent_uuid || pacAgent.id || pacAgent.agent_id;
-              logs.push(`[SERVER-DEEPGRAM] Found existing 'P.A.C. Partner Agent' in project "${pName}" (ID: ${pid})! Using Agent ID: ${agentIdToUse}`);
-              break;
+              logs.push(`[SERVER-DEEPGRAM] Found existing 'P.A.C. Partner Agent' in project "${pName}" (ID: ${pid})! Updating its configuration...`);
+              
+              const updatePayload = {
+                name: "Partner Agent",
+                metadata: {
+                  title: "Partner Agent"
+                },
+                config: JSON.stringify({
+                  agent: {
+                    think: {
+                      provider: { type: "open_ai", model: "gpt-4o-mini" },
+                      prompt: GLOBAL_PAC_SYSTEM_PROMPT,
+                      functions: [
+                        {
+                          name: "list_opportunities",
+                          description: "Retrieves the list of active opportunities/leads currently in the database. Call this to review available leads before recommending one.",
+                          parameters: { type: "object", properties: {} }
+                        },
+                        {
+                          name: "pull_up_card",
+                          description: "Pulls up and displays a specific opportunity/lead card in the user's dashboard view.",
+                          parameters: {
+                            type: "object",
+                            properties: {
+                              opportunity_id: { type: "string", description: "The unique ID of the opportunity card to display." }
+                            },
+                            required: ["opportunity_id"]
+                          }
+                        },
+                        {
+                          name: "update_opportunity_card",
+                          description: "Updates the details of a specific opportunity card in the database, such as editing its status (e.g. 'Saved', 'Contacted', 'Archived'), adding/updating custom notes, or adding research information.",
+                          parameters: {
+                            type: "object",
+                            properties: {
+                              opportunity_id: { type: "string", description: "The unique ID of the opportunity to update." },
+                              status: { type: "string", description: "The new status of the opportunity (e.g. 'Saved', 'Contacted', 'Archived'). Optional." },
+                              notes: { type: "string", description: "Custom notes to append or set on the opportunity card. Optional." },
+                              contact_email: { type: "string", description: "The contact email address for this lead. Optional." },
+                              estimated_deal_value: { type: "number", description: "The estimated revenue/deal value for this lead. Optional." }
+                            },
+                            required: ["opportunity_id"]
+                          }
+                        },
+                        {
+                          name: "trigger_lead_sweep",
+                          description: "Triggers the bot fleet crawlers to sweep all configured platforms (Reddit, Discourse, RSS, Firecrawl, etc.) for new business opportunities.",
+                          parameters: { type: "object", properties: {} }
+                        },
+                        {
+                          name: "execute_local_command",
+                          description: "Runs a shell command locally on the user's computer via the Slingshot bridge (e.g., executing a python or JS script like OpenClaw, building software, checking file contents).",
+                          parameters: {
+                            type: "object",
+                            properties: {
+                              command: { type: "string", description: "The exact shell command to run on the local machine." },
+                              cwd: { type: "string", description: "The directory to run the command in (optional)." }
+                            },
+                            required: ["command"]
+                          }
+                        }
+                      ]
+                    },
+                    listen: {
+                      provider: {
+                        type: "deepgram",
+                        version: "v2",
+                        model: "flux-general-en",
+                        eot_threshold: 0.7,
+                        eager_eot_threshold: 0.4
+                      }
+                    },
+                    speak: {
+                      provider: {
+                        type: "deepgram",
+                        model: voice || "aura-2-jupiter-en",
+                        ...((voice || "aura-2-jupiter-en").startsWith("flux-") ? { version: "v2" } : {})
+                      }
+                    },
+                    greeting: "Partner, I've got our pipeline analyzed. We need to lock in Client #1 today. Let's look at the highest-pain target right now, review the outreach angle, and pull the trigger."
+                  }
+                })
+              };
+
+              try {
+                const patchRes = await fetch(`https://api.deepgram.com/v1/projects/${pid}/agents/${agentIdToUse}`, {
+                  method: "PATCH",
+                  headers: {
+                    "Authorization": `Token ${apiKey}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify(updatePayload)
+                });
+
+                if (patchRes.ok) {
+                  logs.push(`[SERVER-DEEPGRAM] Successfully updated agent ${agentIdToUse} with newest prompt, tools, and eager-threshold settings!`);
+                  break;
+                } else {
+                  const patchErr = await patchRes.text();
+                  logs.push(`[SERVER-DEEPGRAM] PATCH failed (Status: ${patchRes.status}): ${patchErr}. Generating new agent as fallback...`);
+                  agentIdToUse = "";
+                }
+              } catch (patchErr: any) {
+                logs.push(`[SERVER-DEEPGRAM] PATCH error: ${patchErr.message || patchErr}. Generating new agent as fallback...`);
+                agentIdToUse = "";
+              }
             }
           } else {
             logs.push(`[SERVER-DEEPGRAM] Agent check on project "${pName}" returned status ${agentsRes.status}.`);
@@ -7471,11 +7630,43 @@ app.post("/api/deepgram/setup", async (req, res) => {
                       },
                       required: ["opportunity_id"]
                     }
+                  },
+                  {
+                    name: "trigger_lead_sweep",
+                    description: "Triggers the bot fleet crawlers to sweep all configured platforms (Reddit, Discourse, RSS, Firecrawl, etc.) for new business opportunities.",
+                    parameters: {
+                      type: "object",
+                      properties: {}
+                    }
+                  },
+                  {
+                    name: "execute_local_command",
+                    description: "Runs a shell command locally on the user's computer via the Slingshot bridge (e.g., executing a python or JS script like OpenClaw, building software, checking file contents).",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        command: {
+                          type: "string",
+                          description: "The exact shell command to run on the local machine."
+                        },
+                        cwd: {
+                          type: "string",
+                          description: "The directory to run the command in (optional)."
+                        }
+                      },
+                      required: ["command"]
+                    }
                   }
                 ]
               },
               listen: {
-                provider: { type: "deepgram", version: "v2", model: "flux-general-en" }
+                provider: {
+                  type: "deepgram",
+                  version: "v2",
+                  model: "flux-general-en",
+                  eot_threshold: 0.7,
+                  eager_eot_threshold: 0.4
+                }
               },
               speak: {
                 provider: {
@@ -7635,7 +7826,25 @@ if (!isWorker) {
     }
 
     // Deepgram Conversational Voice Agent endpoint: wss://agent.deepgram.com/v1/agent/converse
-    const targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
+    const params = new URLSearchParams();
+    if (agentId) params.set("agent_id", agentId);
+    const encoding = urlObj.searchParams.get("encoding");
+    if (encoding) params.set("encoding", encoding);
+    const sampleRate = urlObj.searchParams.get("sample_rate");
+    if (sampleRate) params.set("sample_rate", sampleRate);
+    const channels = urlObj.searchParams.get("channels");
+    if (channels) params.set("channels", channels);
+    if (sanitizedUtteranceEndMs) params.set("utterance_end_ms", String(sanitizedUtteranceEndMs));
+    const eagerEot = urlObj.searchParams.get("eager_eot_threshold");
+    if (eagerEot) params.set("eager_eot_threshold", eagerEot);
+    const eotThreshold = urlObj.searchParams.get("eot_threshold");
+    if (eotThreshold) params.set("eot_threshold", eotThreshold);
+
+    let targetUrl = "wss://agent.deepgram.com/v1/agent/converse";
+    const queryString = params.toString();
+    if (queryString) {
+      targetUrl += "?" + queryString;
+    }
 
     console.log(`[SERVER-WS-PROXY] Connecting strictly to Deepgram Conversational Voice Agent: ${targetUrl}`);
 
@@ -7837,6 +8046,10 @@ export default {
       const channels = url.searchParams.get("channels");
       if (channels) params.set("channels", channels);
       if (sanitizedUtteranceEndMs) params.set("utterance_end_ms", String(sanitizedUtteranceEndMs));
+      const eagerEot = url.searchParams.get("eager_eot_threshold");
+      if (eagerEot) params.set("eager_eot_threshold", eagerEot);
+      const eotThreshold = url.searchParams.get("eot_threshold");
+      if (eotThreshold) params.set("eot_threshold", eotThreshold);
 
       const queryString = params.toString();
       if (queryString) {
