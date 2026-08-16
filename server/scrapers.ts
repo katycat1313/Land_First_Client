@@ -745,10 +745,10 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
 
     // Single unified LLM extraction call
     const prompt = `
-      You are an advanced AI opportunity classifier for a solo developer.
-      Analyze these authentic scraped posts from small-to-medium business owners, contractors, and operators.
-      Extract up to 3 genuine, software-addressable operational bottlenecks classified as "help_seeker".
-      STRICT FILTER: Reject self-promotional pitches ("solution_sharer" or "noise") and developer/programmer chatter.
+      You are an advanced AI opportunity classifier for a solo developer and automation consultant.
+      Analyze these authentic scraped posts from small business owners, contractors, marketing agencies, e-commerce operators, and real estate managers.
+      Extract genuine, addressable operational bottlenecks, broken automations, manual data entry headaches, or integration challenges classified as "help_seeker".
+      STRICT FILTER: Reject self-promotional ads ("solution_sharer" or "noise"). DO qualify marketing agencies, micro-business owners, and operators asking for help with automations, webhooks, spreadsheets, client reporting, and software workflows.
 
       Posts:
       ${JSON.stringify(itemsForLLM)}

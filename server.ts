@@ -2092,24 +2092,29 @@ const defaultBotConfig = {
     },
     {
       platformId: "discourse",
-      platformName: "Discourse Forums",
+      platformName: "Discourse & Operations Forums",
       isEnabled: true,
       scanFrequencyMinutes: 60,
       strategy: "targeted",
       targets: [
         { id: "discourse-1", name: "Make Operations Automation", urlOrPath: "community.make.com", isEnabled: true },
-        { id: "discourse-2", name: "UiPath Enterprise Automation", urlOrPath: "forum.uipath.com", isEnabled: true }
+        { id: "discourse-2", name: "Webflow Agency & Integrations", urlOrPath: "discourse.webflow.com", isEnabled: true },
+        { id: "discourse-3", name: "Bubble Custom App Builders", urlOrPath: "forum.bubble.io", isEnabled: true },
+        { id: "discourse-4", name: "UiPath Process Automation", urlOrPath: "forum.uipath.com", isEnabled: true }
       ]
     },
     {
       platformId: "rss",
-      platformName: "Public RSS Feeds",
+      platformName: "Industry Portals & RSS Feeds",
       isEnabled: true,
-      scanFrequencyMinutes: 90,
+      scanFrequencyMinutes: 60,
       strategy: "scout",
       targets: [
-        { id: "rss-1", name: "Small Business Trends Feed", urlOrPath: "https://smallbiztrends.com/feed/", isEnabled: true },
-        { id: "rss-2", name: "E-commerce Operations & Shopify News", urlOrPath: "https://news.google.com/rss/search?q=site:community.shopify.com+OR+shopify+small+business+workflow&hl=en-US&gl=US&ceid=US:en", isEnabled: true }
+        { id: "rss-1", name: "ContractorTalk Trade Forums", urlOrPath: "https://news.google.com/rss/search?q=site:contractortalk.com+estimating+OR+spreadsheet+OR+software+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-2", name: "BiggerPockets Property Management", urlOrPath: "https://news.google.com/rss/search?q=site:biggerpockets.com/forums+landlord+OR+tenant+manual+OR+software+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-3", name: "Shopify & Retail E-commerce", urlOrPath: "https://news.google.com/rss/search?q=site:community.shopify.com+workflow+OR+inventory+OR+shipping+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-4", name: "Upwork Paying Automation Projects", urlOrPath: "https://news.google.com/rss/search?q=site:upwork.com/freelance-jobs/+\"google+sheets\"+OR+\"automation\"+OR+\"webhook\"+when:7d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-5", name: "Small Business Trends Feed", urlOrPath: "https://smallbiztrends.com/feed/", isEnabled: true }
       ]
     },
     {
@@ -2120,8 +2125,7 @@ const defaultBotConfig = {
       strategy: "scout",
       targets: [
         { id: "quora-1", name: "Quora Small Business Feed", urlOrPath: "Small-Businesses", isEnabled: true },
-        { id: "quora-2", name: "Quora Operations Management", urlOrPath: "Operations-Management", isEnabled: true },
-        { id: "quora-3", name: "Quora Business Automation", urlOrPath: "Business-Automation", isEnabled: false }
+        { id: "quora-2", name: "Quora Operations Management", urlOrPath: "Operations-Management", isEnabled: true }
       ]
     }
   ]
