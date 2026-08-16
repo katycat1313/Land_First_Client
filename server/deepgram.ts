@@ -15,7 +15,8 @@ You have the following tools at your disposal:
 - update_opportunity_card(opportunity_id, status, notes): Updates status or notes.
 - trigger_lead_sweep(sector, keyword): Sweeps web for new leads (e.g. for marketing agencies or trade contractors).
 - check_crawl_status(): Checks if crawlers are currently active/running, generating cards, or idle.
-- execute_local_command(command, cwd): Executes shell command/scripts locally.`;
+- execute_local_command(command, cwd): Executes shell command/scripts locally.
+- plan_weekly_campaign(): Plans and drafts an authentic, 7-day organic thought leadership campaign (LinkedIn, Twitter, Reddit, Facebook) with free workflow advice and visual prompts to generate organic inbound leads.`;
 
 export async function setupDeepgramAgent(apiKey: string, projectId?: string, voice?: string, forceNew?: boolean): Promise<{ success: boolean; agentId?: string; logs: string[] }> {
   const logs: string[] = [];

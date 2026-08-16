@@ -179,4 +179,30 @@ describe("Opportunity Radar Comprehensive Test Suite", () => {
       }
     });
   });
+
+  describe("8. 7-Day Thought Leadership Campaign Planner", () => {
+    it("should generate a 7-day campaign with free workflow blueprints and visual prompts", async () => {
+      const prompt = `
+        Generate a 7-day organic thought leadership campaign starting from today (2026-08-16) for boutique agencies and trade contractors.
+        Format your response as a strict JSON array of objects:
+        [{
+          "id": "post_1",
+          "platform": "LinkedIn",
+          "scheduledDate": "2026-08-16",
+          "content": "Free workflow advice here...",
+          "imagePrompt": "Illustrative diagram description...",
+          "videoScriptPrompt": "30-sec Loom demo outline...",
+          "status": "Pending Approval"
+        }]
+      `;
+
+      const response = await generateUnifiedLLM({ prompt, responseJson: true });
+      assert.ok(response, "LLM must return a non-empty response");
+      const parsed = safeParseJSON(response);
+      assert.ok(Array.isArray(parsed), "Parsed campaign must be an array");
+      assert.ok(parsed.length > 0, "Must generate at least 1 post");
+      assert.ok(parsed[0].content, "Post must have content");
+      assert.ok(parsed[0].imagePrompt, "Post must have an image prompt");
+    });
+  });
 });

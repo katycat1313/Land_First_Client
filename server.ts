@@ -3905,23 +3905,26 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
       - Strictly NO markdown bold (**) or asterisks in the final post contents.
       
       POST STRATEGY:
-      - Share practical advice, real case-studies or operational struggles (e.g. manual spreadsheets, lost HVAC leads, accounts receivable delays) that connect directly to our capabilities.
-      - Platforms can include: LinkedIn, Twitter/X, Reddit (as a helpful comment style), Facebook Groups, or Discourse.
-      - Provide a descriptive "imagePrompt" for each post. The prompt should specify a professional illustrative graphic, visual dashboard mockup, or diagram suitable for generating via an AI image generator.
+      - Share practical advice, real case-studies or operational struggles (e.g. manual spreadsheets, lost HVAC leads, marketing agency client onboarding, webhook syncs) that connect directly to our software solutions.
+      - Each post should offer free upfront value (e.g. a simple formula, workflow blueprint, or step-by-step fix) to build immediate trust and rapport.
+      - Platforms can include: LinkedIn, Twitter/X, Reddit (as a helpful thought-leader discussion), Facebook Groups, or Discourse.
+      - Provide a descriptive "imagePrompt" for illustrative graphics/diagrams.
+      - Provide a concise "videoScriptPrompt" for a 30-second casual screen-share demo or Reel.
     `;
 
     const prompt = `
-      Based on our current top B2B opportunities:\n${activeOppsSummary || "No active leads yet. Focus generally on HVAC, roofing, and marketing agency billing automation."}
+      Based on our current top B2B opportunities:\n${activeOppsSummary || "Focus on HVAC contractor scheduling, marketing agency white-label CRM integrations, and small business invoice automation."}
       
-      Generate a 7-day social posting campaign starting from today (${new Date().toISOString().split("T")[0]}).
+      Generate a comprehensive 7-day organic thought leadership campaign starting from today (${new Date().toISOString().split("T")[0]}).
       
       Format your response as a strict JSON array of objects matching this exact structure:
       [{
         "id": "post_1",
         "platform": "LinkedIn",
         "scheduledDate": "YYYY-MM-DD",
-        "content": "Full post text here...",
-        "imagePrompt": "Detailed illustrative image prompt here...",
+        "content": "Full post text with free actionable advice...",
+        "imagePrompt": "Illustrative diagram or visual mockup description...",
+        "videoScriptPrompt": "30-second Loom demo / Reel script outline...",
         "status": "Pending Approval"
       }]
     `;
@@ -3934,7 +3937,7 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
       temperature: 0.8
     });
 
-    const parsed = JSON.parse(rawResult);
+    const parsed = safeParseJSON(rawResult || "[]");
     if (Array.isArray(parsed) && parsed.length > 0) {
       saveSocialCampaigns(parsed);
       return res.json({ success: true, posts: parsed });

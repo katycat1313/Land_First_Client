@@ -629,6 +629,14 @@ export default function PacOverlay({
       });
     }
 
+    // 0f. Plan Weekly Social Campaign Action Tag
+    if (text.includes("[ACTION: PLAN_CAMPAIGN]") || /\[ACTION:\s*PLAN_CAMPAIGN\]/i.test(text)) {
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📅 Voice request to plan 7-day thought leadership campaign detected.`]);
+      setActiveTab("campaigns");
+      setIsMinimized(false);
+      handleGenerateCampaign();
+    }
+
     // 1. Check for memory updates
     const memoryMatch = text.match(/```memory\s*([\s\S]+?)```/i);
     const bracketMemoryMatch = text.match(/\[MEMORY\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i);
@@ -1566,6 +1574,14 @@ This will automatically update your database and notes so you do not forget them
                       },
                       required: ["command"]
                     }
+                  },
+                  {
+                    name: "plan_weekly_campaign",
+                    description: "Generates an authentic, 7-day thought leadership social media campaign (LinkedIn, Twitter/X, Reddit, Facebook Groups) with practical advice, free workflow formulas, and visual asset/video prompts to drive organic inbound client leads.",
+                    parameters: {
+                      type: "object",
+                      properties: {}
+                    }
                   }
                 ]
               }
@@ -1832,6 +1848,12 @@ This will automatically update your database and notes so you do not forget them
                 }).catch(err => {
                   setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Command execution error: ${err.message}`]);
                 });
+              } else if (funcName === "plan_weekly_campaign") {
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📅 Planning 7-day organic social thought leadership campaign...`]);
+                setActiveTab("campaigns");
+                setIsMinimized(false);
+                handleGenerateCampaign();
+                responseOutput = "I have opened the Campaigns tab and initiated generation of a 7-day thought leadership campaign. The posts with advice, workflow templates, and visual prompts will be ready for your review in a few seconds.";
               }
 
               if (callId) {
@@ -3735,6 +3757,18 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                               Generated Asset
                             </div>
                           </div>
+
+                          {/* Video Script Outline (if available) */}
+                          {post.videoScriptPrompt && (
+                            <div className="col-span-1 md:col-span-2 space-y-1.5 bg-slate-950/80 p-2.5 rounded-lg border border-indigo-900/30">
+                              <div className="flex items-center gap-1.5 text-indigo-400 font-mono text-[9px] font-bold uppercase tracking-wider">
+                                <Sparkles size={11} /> 30-Sec Video / Loom Demo Outline
+                              </div>
+                              <p className="text-[10px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
+                                {post.videoScriptPrompt}
+                              </p>
+                            </div>
+                          )}
                         </div>
 
                         {/* Actions (Approve / Reject Loop) */}
