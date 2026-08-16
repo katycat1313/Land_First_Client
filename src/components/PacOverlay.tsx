@@ -3567,16 +3567,22 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                       <button
                         onClick={async () => {
                           // 1. Calculate destination URL first synchronously
+                          const cleanAuthor = (activeDocument.targetAuthor || "")
+                            .replace(/^https?:\/\/(www\.)?reddit\.com\/(u|user)\//i, "")
+                            .replace(/^\/?(u|user)\//i, "")
+                            .replace(/^@/, "")
+                            .replace(/\/$/, "")
+                            .trim();
+
+                          const isPlaceholder = !cleanAuthor || cleanAuthor === "[deleted]" || cleanAuthor === "AutoModerator" || cleanAuthor.includes("Atom_User") || cleanAuthor.includes("Reddit_User") || cleanAuthor.toLowerCase() === "user";
+
                           const isReddit = activeDocument.targetPlatform?.includes("Reddit") || 
                             activeDocument.title?.toLowerCase().includes("reddit") || 
                             (activeDocument.targetUrl && activeDocument.targetUrl.includes("reddit.com")) ||
-                            Boolean(activeDocument.targetAuthor);
-
-                          let cleanAuthor = (activeDocument.targetAuthor || "").replace(/^u\//, "");
-                          if (cleanAuthor === "[deleted]") cleanAuthor = "";
+                            (!isPlaceholder);
 
                           let destinationUrl = "";
-                          if (isReddit && cleanAuthor) {
+                          if (isReddit && !isPlaceholder) {
                             destinationUrl = `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your post: " + (activeDocument.title || "workflow bottleneck"))}&message=${encodeURIComponent(activeDocument.content)}`;
                           } else if (activeDocument.targetUrl && activeDocument.targetUrl.startsWith("http")) {
                             destinationUrl = activeDocument.targetUrl;

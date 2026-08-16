@@ -1156,15 +1156,27 @@ export default function OpportunityCardDetail({
                     <div className="grid grid-cols-1 gap-2 pt-1">
                       {opportunity.sourcePlatform.includes("Reddit") && (
                         <button
-                          onClick={async () => {
-                            try {
-                              await navigator.clipboard.writeText(draft);
-                            } catch (e) {}
-                            const cleanAuthor = (opportunity.author || "").replace(/^u\//, "");
-                            const pmUrl = cleanAuthor && cleanAuthor !== "[deleted]"
-                              ? `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your workflow bottleneck")}&message=${encodeURIComponent(draft)}`
+                          onClick={() => {
+                            const cleanAuthor = (opportunity.author || "")
+                              .replace(/^https?:\/\/(www\.)?reddit\.com\/(u|user)\//i, "")
+                              .replace(/^\/?(u|user)\//i, "")
+                              .replace(/^@/, "")
+                              .replace(/\/$/, "")
+                              .trim();
+
+                            const isPlaceholder = !cleanAuthor || cleanAuthor === "[deleted]" || cleanAuthor === "AutoModerator" || cleanAuthor.includes("Atom_User") || cleanAuthor.includes("Reddit_User") || cleanAuthor.toLowerCase() === "user";
+
+                            const pmUrl = !isPlaceholder
+                              ? `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your workflow challenge")}&message=${encodeURIComponent(draft)}`
                               : (opportunity.sourceUrl || "https://reddit.com");
+
+                            // Open window synchronously to avoid popup blockers
                             window.open(pmUrl, '_blank');
+
+                            try {
+                              navigator.clipboard.writeText(draft);
+                            } catch (e) {}
+
                             handleMarkSentAndLog();
                           }}
                           className="w-full py-1.5 px-3 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm"

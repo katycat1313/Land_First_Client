@@ -651,6 +651,15 @@ const loadOpportunities = (): any[] => {
     if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
       updated.solutionOptions = getFallbackSolutionOptions(updated);
     }
+    if (updated.author) {
+      const cleanAuthor = String(updated.author)
+        .replace(/^https?:\/\/(www\.)?reddit\.com\/(u|user)\//i, "")
+        .replace(/^\/?(u|user)\//i, "")
+        .replace(/^@/, "")
+        .replace(/\/$/, "")
+        .trim();
+      updated.author = cleanAuthor || "Reddit_User";
+    }
     return updated;
   });
 };

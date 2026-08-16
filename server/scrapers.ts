@@ -110,6 +110,16 @@ export function cleanHtmlAndCdata(text: string): string {
   return clean.replace(/\s+/g, " ").trim();
 }
 
+export function cleanAuthorUsername(raw: string): string {
+  if (!raw) return "";
+  let clean = cleanHtmlAndCdata(raw);
+  clean = clean.replace(/^https?:\/\/(www\.)?reddit\.com\/(u|user)\//i, "");
+  clean = clean.replace(/^\/?(u|user)\//i, "");
+  clean = clean.replace(/^@/, "");
+  clean = clean.replace(/\/$/, "");
+  return clean.trim();
+}
+
 function extractXmlField(xml: string, tag: string): string {
   const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
   const match = regex.exec(xml);
@@ -432,11 +442,11 @@ export async function scrapeRSSFeed(feedUrl: string, platformName: string, budge
         let author = "Atom_User";
         const authorMatch = /<author>([\s\S]*?)<\/author>/i.exec(entryXml);
         if (authorMatch) {
-          const name = extractXmlField(authorMatch[1], "name");
-          if (name) author = name;
+          const name = extractXmlField(authorMatch[1], "name") || extractXmlField(authorMatch[1], "uri");
+          if (name) author = cleanAuthorUsername(name);
         }
         const id = extractXmlField(entryXml, "id") || link || String(Date.now());
-        if (title && link) items.push({ title, link, description: content, creator: author, guid: id, timestamp: isNaN(entryTime) ? Date.now() : entryTime });
+        if (title && link) items.push({ title, link, description: content, creator: cleanAuthorUsername(author), guid: id, timestamp: isNaN(entryTime) ? Date.now() : entryTime });
       }
     }
 
@@ -445,7 +455,7 @@ export async function scrapeRSSFeed(feedUrl: string, platformName: string, budge
       const cleanDesc = cleanHtmlAndCdata(item.description || "");
       results.push({
         id: `rss-${hashString(item.guid || item.link)}`,
-        author: cleanHtmlAndCdata(item.creator),
+        author: cleanAuthorUsername(item.creator),
         sourcePlatform: platformName,
         sourceUrl: item.link.trim(),
         text: `${cleanTitle}\n\n${cleanDesc}`.substring(0, 1500),
@@ -803,6 +813,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
           classification: "help_seeker",
           fullPostText,
           ...opp,
+          author: cleanAuthorUsername(opp.author || matchedComment?.author || "Reddit_User"),
           title: opp.title || matchedComment?.title || "Operational Bottleneck Lead",
           solutionOptions: getFallbackSolutionOptions(opp)
         };
