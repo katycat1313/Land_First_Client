@@ -669,20 +669,28 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
       logs.push(`[Reddit] Retrieved ${hits.length} authentic post(s) from r/${subreddit}.`);
     } else if (targetPlatform.platformId === "discourse" || targetPlatform.platformId === "bizwarriors") {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
-      const primaryTarget = activeTargets[0] || { urlOrPath: "community.make.com", name: "Make Community" };
+      const targetsToScan = activeTargets.length > 0 ? activeTargets.slice(0, 3) : [{ urlOrPath: "community.make.com", name: "Make Community" }];
       
-      logs.push(`[Discourse] Deep crawling forum "${primaryTarget.name}" (${primaryTarget.urlOrPath})...`);
-      const hits = await scrapeDiscourse(primaryTarget.urlOrPath, targetKeyword, targetSector, undefined, subrequestBudget);
-      rawScrapedPool.push(...hits);
-      logs.push(`[Discourse] Retrieved ${hits.length} topic(s) from ${primaryTarget.name}.`);
+      for (const target of targetsToScan) {
+        logs.push(`[Discourse] Deep crawling forum "${target.name}" (${target.urlOrPath})...`);
+        const hits = await scrapeDiscourse(target.urlOrPath, targetKeyword, targetSector, undefined, subrequestBudget);
+        rawScrapedPool.push(...hits);
+        logs.push(`[Discourse] Retrieved ${hits.length} topic(s) from ${target.name}.`);
+      }
     } else if (targetPlatform.platformId === "rss") {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
-      const primaryTarget = activeTargets[0] || { urlOrPath: "https://smallbiztrends.com/feed/", name: "Small Business Feed" };
-      
-      logs.push(`[RSS] Scanning business feed "${primaryTarget.name}"...`);
-      const hits = await scrapeRSSFeed(primaryTarget.urlOrPath, `RSS (${primaryTarget.name})`, subrequestBudget);
-      rawScrapedPool.push(...hits);
-      logs.push(`[RSS] Scanned ${hits.length} entry(ies) from ${primaryTarget.name}.`);
+      const matchingTargets = activeTargets.filter((t: any) => 
+        t.name.toLowerCase().includes(targetSector.toLowerCase().slice(0, 6)) ||
+        t.urlOrPath.toLowerCase().includes(targetSector.toLowerCase().slice(0, 6))
+      );
+      const targetsToScan = matchingTargets.length > 0 ? matchingTargets : activeTargets.slice(0, 3);
+
+      for (const target of targetsToScan) {
+        logs.push(`[RSS] Scanning trade portal / feed "${target.name}"...`);
+        const hits = await scrapeRSSFeed(target.urlOrPath, `Portal (${target.name})`, subrequestBudget);
+        rawScrapedPool.push(...hits);
+        logs.push(`[RSS] Scanned ${hits.length} entry(ies) from ${target.name}.`);
+      }
     } else if (targetPlatform.platformId === "quora") {
       const cleanTopic = targetSector.replace(/[^a-zA-Z0-9 ]/g, "").trim() || "Small Business Operations";
       logs.push(`[Quora] Scanning verified business pain threads for topic "${cleanTopic}"...`);

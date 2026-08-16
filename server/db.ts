@@ -249,13 +249,92 @@ export const saveOpportunities = (data: any[]) => {
   }
 };
 
+export const defaultBotConfig = {
+  schedulerEnabled: true,
+  schedulerIntervalMinutes: 60,
+  emailAlertsEnabled: false,
+  alertRecipientEmail: process.env.ALERT_RECIPIENT_EMAIL || "upscaleyourbusiness.wv@gmail.com",
+  minAlertScore: 75,
+  platforms: [
+    {
+      platformId: "reddit",
+      platformName: "Reddit",
+      isEnabled: true,
+      scanFrequencyMinutes: 30,
+      strategy: "targeted",
+      targets: [
+        { id: "reddit-1", name: "r/smallbusiness", urlOrPath: "smallbusiness", isEnabled: true },
+        { id: "reddit-2", name: "r/sweatystartup", urlOrPath: "sweatystartup", isEnabled: true },
+        { id: "reddit-3", name: "r/construction", urlOrPath: "construction", isEnabled: true },
+        { id: "reddit-4", name: "r/bookkeeping", urlOrPath: "bookkeeping", isEnabled: false }
+      ]
+    },
+    {
+      platformId: "discourse",
+      platformName: "Discourse & Operations Forums",
+      isEnabled: true,
+      scanFrequencyMinutes: 60,
+      strategy: "targeted",
+      targets: [
+        { id: "discourse-1", name: "Make Operations Automation", urlOrPath: "community.make.com", isEnabled: true },
+        { id: "discourse-2", name: "Webflow Agency & Integrations", urlOrPath: "discourse.webflow.com", isEnabled: true },
+        { id: "discourse-3", name: "Bubble Custom App Builders", urlOrPath: "forum.bubble.io", isEnabled: true },
+        { id: "discourse-4", name: "UiPath Process Automation", urlOrPath: "forum.uipath.com", isEnabled: true }
+      ]
+    },
+    {
+      platformId: "rss",
+      platformName: "Industry Portals & RSS Feeds",
+      isEnabled: true,
+      scanFrequencyMinutes: 60,
+      strategy: "scout",
+      targets: [
+        { id: "rss-1", name: "ContractorTalk Trade Forums", urlOrPath: "https://news.google.com/rss/search?q=site:contractortalk.com+estimating+OR+spreadsheet+OR+software+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-2", name: "BiggerPockets Property Management", urlOrPath: "https://news.google.com/rss/search?q=site:biggerpockets.com/forums+landlord+OR+tenant+manual+OR+software+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-3", name: "Shopify & Retail E-commerce", urlOrPath: "https://news.google.com/rss/search?q=site:community.shopify.com+workflow+OR+inventory+OR+shipping+when:14d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-4", name: "Upwork Paying Automation Projects", urlOrPath: "https://news.google.com/rss/search?q=site:upwork.com/freelance-jobs/+\"google+sheets\"+OR+\"automation\"+OR+\"webhook\"+when:7d&hl=en-US&gl=US&ceid=US:en", isEnabled: true },
+        { id: "rss-5", name: "Small Business Trends Feed", urlOrPath: "https://smallbiztrends.com/feed/", isEnabled: true }
+      ]
+    },
+    {
+      platformId: "quora",
+      platformName: "Quora Topics",
+      isEnabled: true,
+      scanFrequencyMinutes: 60,
+      strategy: "scout",
+      targets: [
+        { id: "quora-1", name: "Quora Small Business Feed", urlOrPath: "Small-Businesses", isEnabled: true },
+        { id: "quora-2", name: "Quora Operations Management", urlOrPath: "Operations-Management", isEnabled: true }
+      ]
+    }
+  ]
+};
+
 export const loadBotConfig = (): any => {
   const data = safeReadFile(BOT_CONFIG_FILE, "{}");
+  let config: any = {};
   try {
-    return JSON.parse(data);
+    config = JSON.parse(data);
   } catch (e) {
-    return {};
+    config = {};
   }
+  if (config && Array.isArray(config.platforms)) {
+    for (const defaultPlat of defaultBotConfig.platforms) {
+      const existingPlat = config.platforms.find((p: any) => p.platformId === defaultPlat.platformId);
+      if (!existingPlat) {
+        config.platforms.push(defaultPlat);
+      } else {
+        for (const defaultTarget of defaultPlat.targets || []) {
+          if (!existingPlat.targets?.some((t: any) => t.id === defaultTarget.id || t.urlOrPath === defaultTarget.urlOrPath)) {
+            existingPlat.targets = existingPlat.targets || [];
+            existingPlat.targets.push(defaultTarget);
+          }
+        }
+      }
+    }
+    return config;
+  }
+  return defaultBotConfig;
 };
 
 export const saveBotConfig = (data: any) => {
