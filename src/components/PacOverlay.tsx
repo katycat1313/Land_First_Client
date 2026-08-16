@@ -1699,48 +1699,73 @@ This will automatically update your database and notes so you do not forget them
                 responseOutput = `Subsystem self-diagnostics completed. Tested all 5 core subsystems: Deepgram Voice (OK), Gemini Chat (OK), Memory Bank (OK), UI Navigator (OK), Audio Engine (OK). All operational.`;
                 setComputerLogs(prev => [...prev, `[DEEPGRAM-TOOL] P.A.C. executed full diagnostics self-check.`]);
               } else if (funcName === "trigger_lead_sweep") {
-                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Triggering active lead sweep across configured platforms...`]);
-                try {
-                  const res = await apiFetch("/api/bot-config/trigger-sweep", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" }
-                  });
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Triggering active lead sweep in background...`]);
+                
+                // Immediately return success output so the voice session loop is NOT blocked
+                responseOutput = "Lead sweep has been launched in the background. I will check back and update you as soon as the bot fleet completes the crawl.";
+                
+                // Execute the actual crawl in a background promise
+                apiFetch("/api/bot-config/trigger-sweep", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" }
+                }).then(async (res) => {
                   if (res.ok) {
                     const data = await res.json();
                     const foundCount = data.foundOpps ? data.foundOpps.length : 0;
                     onRefreshOpportunities?.();
-                    responseOutput = `Lead sweep completed. Found ${foundCount} new opportunities.`;
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Sweep complete! Found ${foundCount} new opportunities.`]);
+                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Sweep complete! Found ${foundCount} new opportunities.`]);
+                    
+                    // Inject a system notice text directly into the voice session history to inform PAC
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "InjectUserMessage",
+                        content: `SYSTEM: Background lead sweep completed. Found ${foundCount} new opportunities. Let the user know!`
+                      }));
+                    }
                   } else {
-                    responseOutput = `Lead sweep failed: HTTP ${res.status}`;
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed with HTTP status ${res.status}`]);
+                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Sweep failed: HTTP ${res.status}`]);
                   }
-                } catch (err: any) {
-                  responseOutput = `Lead sweep failed: ${err.message || err}`;
-                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed: ${err.message || err}`]);
-                }
+                }).catch(err => {
+                  setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Sweep failed: ${err.message || err}`]);
+                });
               } else if (funcName === "execute_local_command") {
                 const cmd = rawArgs.command;
                 const cwd = rawArgs.cwd;
-                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🖥️ Running local command: "${cmd}"...`]);
-                try {
-                  const res = await apiFetch("/api/bot-config/execute-local", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ command: cmd, cwd })
-                  });
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🖥️ Running local command in background: "${cmd}"...`]);
+                
+                // Immediately return success output so the voice session loop is NOT blocked
+                responseOutput = `Command "${cmd}" has been sent to Asus G14 Slingshot bridge for execution in the background. I will notify you with the console outputs when finished.`;
+                
+                // Execute the command in the background
+                apiFetch("/api/bot-config/execute-local", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ command: cmd, cwd })
+                }).then(async (res) => {
                   const data = await res.json();
                   if (res.ok && data.success !== false) {
-                    responseOutput = `Command executed successfully. stdout: ${data.stdout || "none"}, stderr: ${data.stderr || "none"}`;
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Command complete! stdout: ${data.stdout?.substring(0, 60) || "none"}`]);
+                    const stdoutTail = data.stdout?.substring(0, 500) || "none";
+                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Command "${cmd}" complete! Output: ${stdoutTail}`]);
+                    
+                    // Inject the stdout/stderr into the voice conversation history
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "InjectUserMessage",
+                        content: `SYSTEM: Background command "${cmd}" execution complete. stdout: ${data.stdout || "none"}. Let the user know the outcome!`
+                      }));
+                    }
                   } else {
-                    responseOutput = `Command failed: ${data.error || data.stderr || "unknown error"}`;
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command failed: ${data.error || data.stderr || "unknown"}`]);
+                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Command failed: ${data.error || data.stderr || "unknown"}`]);
+                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                      dgSocketRef.current.send(JSON.stringify({
+                        type: "InjectUserMessage",
+                        content: `SYSTEM: Background command "${cmd}" execution FAILED. Error: ${data.error || data.stderr || "unknown"}`
+                      }));
+                    }
                   }
-                } catch (err: any) {
-                  responseOutput = `Command failed: ${err.message || err}`;
-                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command execution error: ${err.message}`]);
-                }
+                }).catch(err => {
+                  setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Command execution error: ${err.message}`]);
+                });
               }
 
               if (callId) {
