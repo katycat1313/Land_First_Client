@@ -8,8 +8,8 @@ export let llmConfig = {
   crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "",
   g14TunnelUrl: process.env.G14_TUNNEL_URL || "",
   model: process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct-q4_k_m",
-  provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini",
-  useSlingshot: true
+  provider: (process.env.LLM_PROVIDER || "gemini") as "auto" | "ollama" | "gemini" | "openai",
+  useSlingshot: false
 };
 
 export const getGeminiClient = () => {
@@ -75,16 +75,13 @@ export async function generateSemanticQueries(targetSector: string, keyword: str
       Return ONLY a JSON string array of 5-8 raw queries. No explanation, no markdown wraps.
     `;
 
-    console.log(`[Semantic Query Builder] Querying Gemini for organic queries...`);
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
+    console.log(`[Semantic Query Builder] Querying Unified LLM for organic queries...`);
+    const responseText = await generateUnifiedLLM({
+      prompt,
+      responseJson: true
     });
 
-    const parsed = safeParseJSON(response.text || "[]");
+    const parsed = safeParseJSON(responseText || "[]");
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed.map((q: string) => q.replace(/[\\]/g, "").trim());
     }
@@ -331,6 +328,22 @@ export async function generateUnifiedLLM({
 }): Promise<string> {
   const provider = llmConfig.provider;
 
+  if (provider === "openai") {
+    try {
+      console.log("[LLM Unified] Requesting generation via OpenAI GPT-4o-Mini directly...");
+      const result = await callOpenAILLM({
+        systemPrompt,
+        prompt,
+        history,
+        responseJson,
+        temperature
+      });
+      if (result) return result;
+    } catch (openaiErr: any) {
+      console.error(`[LLM Unified] OpenAI direct call failed: ${openaiErr.message}`);
+    }
+  }
+
   if (provider === "ollama" || provider === "auto") {
     try {
       console.log(`[LLM Unified] Requesting generation via Ollama Qwen2.5 (${llmConfig.baseUrl})...`);
@@ -348,7 +361,14 @@ export async function generateUnifiedLLM({
   }
 
   const ai = getGeminiClient();
-  const geminiModels = ["gemini-3.6-flash", "gemini-3.6-flash"];
+  const geminiModels = [
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-3.7-flash"
+  ];
 
   let fullPromptText = prompt;
   if (systemPrompt) {

@@ -590,11 +590,14 @@ export default function PacOverlay({
     }
 
     // 0d. Trigger Scraper Sweep Action Tag
-    if (text.includes("[ACTION: TRIGGER_SWEEP]") || /\[ACTION:\s*TRIGGER_SWEEP\]/i.test(text)) {
-      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📡 Voice request to run crawler sweeps detected.`]);
+    const sweepMatch = text.match(/\[ACTION:\s*TRIGGER_SWEEP(?::\s*([^\]]+))?\]/i);
+    if (sweepMatch || text.includes("[ACTION: TRIGGER_SWEEP]")) {
+      const targetSector = sweepMatch && sweepMatch[1] ? sweepMatch[1].trim() : undefined;
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📡 Voice request to run crawler sweeps detected${targetSector ? ` for ${targetSector}` : ""}.`]);
       apiFetch("/api/bot-config/trigger-sweep", {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sector: targetSector })
       }).then(async (res) => {
         if (res.ok) {
           const data = await res.json();
@@ -1260,6 +1263,17 @@ export default function PacOverlay({
         setDgLifecycleStatus("Connected");
         setComputerLogs(prev => [...prev, "[DEEPGRAM] Voice Agent connection established."]);
 
+        // Start a KeepAlive heartbeat every 3 seconds to prevent CLIENT_MESSAGE_TIMEOUT
+        keepAliveIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: "KeepAlive" }));
+            } catch (err) {
+              console.error("Failed to send KeepAlive to Deepgram:", err);
+            }
+          }
+        }, 3000);
+
         // Send initial Settings payload matching exact Deepgram Voice Agent specification
         try {
           const settingsPayload: any = {
@@ -1520,10 +1534,19 @@ This will automatically update your database and notes so you do not forget them
                   },
                   {
                     name: "trigger_lead_sweep",
-                    description: "Triggers the bot fleet crawlers to sweep all configured platforms (Reddit, Discourse, RSS, Firecrawl, etc.) for new business opportunities.",
+                    description: "Triggers the bot fleet crawlers to sweep all configured platforms (Reddit, Discourse, RSS, Firecrawl, etc.) for new business opportunities in a specific sector or keyword.",
                     parameters: {
                       type: "object",
-                      properties: {}
+                      properties: {
+                        sector: {
+                          type: "string",
+                          description: "Target industry sector (e.g. 'Local Small Businesses', 'Construction & Subcontracting', 'Real Estate & Property Management', 'Marketing agency'). Optional."
+                        },
+                        keyword: {
+                          type: "string",
+                          description: "Target focus keyword or bottleneck phrase (e.g. 'HVAC', 'scheduling', 'spreadsheet'). Optional."
+                        }
+                      }
                     }
                   },
                   {
@@ -1560,6 +1583,15 @@ This will automatically update your database and notes so you do not forget them
 
           console.log("[P.A.C.] Transmitting official Deepgram Voice Agent Settings payload...", settingsPayload);
           ws.send(JSON.stringify(settingsPayload));
+
+          // Send dummy silence packet to initialize the binary audio stream
+          try {
+            const dummySilence = new Uint8Array(320);
+            ws.send(dummySilence);
+            console.log("[P.A.C. WS] Sent dummy silence packet to initialize audio stream.");
+          } catch (silenceErr) {
+            console.error("Failed to send dummy silence packet:", silenceErr);
+          }
         } catch (e) {
           console.error("[P.A.C.] Failed to send Deepgram Settings payload:", e);
         }
@@ -1590,7 +1622,9 @@ This will automatically update your database and notes so you do not forget them
         if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
           playPcmChunk(event.data);
         } else if (typeof event.data === "string") {
-          console.log("[P.A.C. WS] Received text/JSON message:", event.data);
+          if (!event.data.includes("LatencyReport")) {
+            console.log("[P.A.C. WS] Received text/JSON message:", event.data);
+          }
           try {
             const msg = JSON.parse(event.data);
 
@@ -1608,10 +1642,11 @@ This will automatically update your database and notes so you do not forget them
             }
 
             // Deepgram Native Function Call / Tool Request Handling
-            if (msg.type === "FunctionCallRequest" || msg.type === "FunctionCall" || msg.type === "function_call" || msg.function_name) {
-              const callId = msg.function_call_id || msg.id || msg.call_id;
-              const funcName = msg.function_name || msg.name || (msg.function && msg.function.name);
-              let rawArgs = msg.input || msg.parameters || msg.arguments || (msg.function && msg.function.arguments) || {};
+            if (msg.type === "FunctionCallRequest" || msg.functions || msg.type === "FunctionCall" || msg.type === "function_call" || msg.function_name) {
+              const activeFn = (msg.functions && msg.functions[0]) || msg;
+              const callId = activeFn.id || activeFn.function_call_id || activeFn.call_id;
+              const funcName = activeFn.name || activeFn.function_name || (activeFn.function && activeFn.function.name);
+              let rawArgs = activeFn.arguments || activeFn.input || activeFn.parameters || (activeFn.function && activeFn.function.arguments) || {};
               if (typeof rawArgs === "string") {
                 try { rawArgs = JSON.parse(rawArgs); } catch (e) { }
               }
@@ -1803,8 +1838,9 @@ This will automatically update your database and notes so you do not forget them
                 try {
                   ws.send(JSON.stringify({
                     type: "FunctionCallResponse",
-                    function_call_id: callId,
-                    output: responseOutput
+                    id: callId,
+                    name: funcName,
+                    content: responseOutput
                   }));
                 } catch (err) {
                   console.error("Failed to send FunctionCallResponse to Deepgram:", err);
@@ -2495,8 +2531,7 @@ registerProcessor('pcm-processor', PCMProcessor);
       try {
         const injectPayload = {
           type: "InjectUserMessage",
-          content: currentMsg,
-          message: currentMsg
+          content: currentMsg
         };
         dgSocketRef.current.send(JSON.stringify(injectPayload));
         console.log("[P.A.C. WS] Injected user message text directly into Deepgram Voice Agent session:", currentMsg);

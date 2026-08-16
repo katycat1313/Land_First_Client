@@ -266,7 +266,7 @@ async function testScrapeReddit(budget: SubrequestBudget): Promise<any[]> {
   const q = "tedious";
   const url = `https://www.reddit.com/r/${sub}/search.json?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&limit=3`;
   const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 (OpportunityRadar/1.0)",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
     "Accept": "application/json"
   };
 
@@ -709,7 +709,7 @@ async function runDiagnostic() {
   const startTime = Date.now();
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-3.1-flash-lite",
       contents: prompt,
       config: {
         responseMimeType: "application/json"

@@ -119,7 +119,7 @@ async function executeFetch(targetUrl, clientReq, clientRes) {
 
   try {
     const fetchHeaders = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 (OpportunityRadar/1.0 by /u/katycat1313)",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       "Accept": "application/json, text/xml, application/xml, text/html, */*",
       "Accept-Language": "en-US,en;q=0.9",
       "Cache-Control": "no-cache"

@@ -8,8 +8,7 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
     "start": "node dist/server.js",
     "clean": "rm -rf dist",
-    "slingshot": "node g14-slingshot.cjs",
-    "slingshot:tunnel": "cloudflared tunnel --url http://localhost:4000",
+    "test": "tsx --test tests/suite.test.ts",
     "test:diagnose": "tsx scratch/diagnose-pipeline.ts",
     "lint": "tsc --noEmit"
   },

@@ -11,57 +11,49 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config();
 
 import {
-  loadOpportunities,
-  saveOpportunities,
-  loadBotConfig,
-  saveBotConfig,
-  loadAgentMemory,
-  saveAgentMemory,
-  loadSocialCampaigns,
-  saveSocialCampaigns,
-  DB_DIR,
-  DB_FILE,
-  BOT_CONFIG_FILE,
-  ALERTS_FILE,
-  AGENT_MEMORY_FILE,
-  SOCIAL_CAMPAIGNS_FILE,
-  safeReadFile,
-  safeWriteFile,
-  syncSupabaseOnStartup,
-  syncToSupabase,
-  apiCache,
+  getSupabase,
   realHistoricalBackupPosts,
   getFallbackSolutionOptions,
-  getSupabase
+  apiCache
 } from "./server/db";
 
 import {
+  generateUnifiedLLM,
   getGeminiClient,
   safeParseJSON,
   generateSemanticQueries,
   callOllamaLLM,
-  callOpenAILLM,
-  generateUnifiedLLM,
-  llmConfig
+  callOpenAILLM
 } from "./server/llm";
 
 import {
   executeBotFleetSweep,
+  currentCrawlStatus,
   scrapeRedditPublicJSON,
   scrapeDiscourse,
   scrapeRSSFeed,
   scrapeWithFirecrawl,
-  scoreBuyerIntent,
-  createSubrequestBudget,
-  consumeSubrequestBudget,
-  fetchWithSlingshot,
-  currentCrawlStatus
+  scrapeDiscordMessages,
+  scrapeHackerNewsComments,
+  scrapeGitHubIssues,
+  scrapeMastodonStatuses,
+  scrapeStackExchange,
+  scoreBuyerIntent
 } from "./server/scrapers";
 
 import {
   setupDeepgramAgent,
   GLOBAL_PAC_SYSTEM_PROMPT
 } from "./server/deepgram";
+
+async function fetchWithRetry(url: string, options?: RequestInit, retries = 1): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    if (retries > 0) return await fetchWithRetry(url, options, retries - 1);
+    throw err;
+  }
+}
 
 let stripeClientInstance: Stripe | null = null;
 function getStripeClient(): Stripe | null {
@@ -74,7 +66,7 @@ function getStripeClient(): Stripe | null {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3001;
 
 app.use(express.json());
 
@@ -137,8 +129,8 @@ let llmConfig = {
   crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "",
   g14TunnelUrl: process.env.G14_TUNNEL_URL || "",
   model: process.env.OLLAMA_MODEL || "qwen2.5:7b-instruct-q4_k_m",
-  provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini",
-  useSlingshot: true
+  provider: (process.env.LLM_PROVIDER || "auto") as "auto" | "ollama" | "gemini" | "openai",
+  useSlingshot: process.env.USE_SLINGSHOT === "true" || false
 };
 
 // ==========================================
@@ -773,13 +765,69 @@ app.post("/api/llm/config", (req, res) => {
   if (g14TunnelUrl !== undefined) llmConfig.g14TunnelUrl = String(g14TunnelUrl).trim();
   if (model !== undefined) llmConfig.model = String(model).trim() || "qwen2.5";
   if (useSlingshot !== undefined) llmConfig.useSlingshot = Boolean(useSlingshot);
-  if (provider && ["auto", "ollama", "gemini"].includes(provider)) {
+  if (provider && ["auto", "ollama", "gemini", "openai"].includes(provider)) {
     llmConfig.provider = provider;
   }
   console.log("[LLM & Crawler Config] Updated tunnel settings:", llmConfig);
   res.json({
     success: true,
     config: llmConfig
+  });
+});
+
+// GET /api/diagnostics/health - Pinpoint subsystem health check
+app.get("/api/diagnostics/health", async (req, res) => {
+  const results: Record<string, { status: "ok" | "degraded" | "failed"; latencyMs?: number; message?: string }> = {};
+
+  // 1. Database Check
+  try {
+    const opps = loadOpportunities();
+    results.database = { status: "ok", message: `Active with ${opps.length} opportunities.` };
+  } catch (e: any) {
+    results.database = { status: "failed", message: `DB error: ${e.message || e}` };
+  }
+
+  // 2. Gemini AI Check
+  const aiStart = Date.now();
+  try {
+    const ai = getGeminiClient();
+    const testGen = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite",
+      contents: "ping",
+      config: { responseMimeType: "application/json" }
+    });
+    results.gemini = { status: "ok", latencyMs: Date.now() - aiStart, message: "Gemini 3.1 Flash-Lite online." };
+  } catch (e: any) {
+    results.gemini = { status: "degraded", latencyMs: Date.now() - aiStart, message: `Gemini check: ${e.message || e}` };
+  }
+
+  // 3. RSS / Google News Scraper Check
+  const rssStart = Date.now();
+  try {
+    const budget = createSubrequestBudget(2);
+    const testUrl = "https://news.google.com/rss/search?q=site:community.shopify.com+workflow&hl=en-US&gl=US&ceid=US:en";
+    const hits = await scrapeRSSFeed(testUrl, "Health Check RSS", budget);
+    results.rssCrawler = {
+      status: hits.length > 0 ? "ok" : "degraded",
+      latencyMs: Date.now() - rssStart,
+      message: `Retrieved ${hits.length} items from RSS.`
+    };
+  } catch (e: any) {
+    results.rssCrawler = { status: "failed", latencyMs: Date.now() - rssStart, message: e.message || e };
+  }
+
+  // 4. Memory Cache Check
+  try {
+    results.cache = { status: "ok", message: `Cache operational (${apiCache.size()} items cached).` };
+  } catch (e: any) {
+    results.cache = { status: "degraded", message: e.message || e };
+  }
+
+  const allOk = Object.values(results).every(r => r.status === "ok");
+  res.json({
+    status: allOk ? "healthy" : "degraded",
+    timestamp: new Date().toISOString(),
+    subsystems: results
   });
 });
 
@@ -961,15 +1009,12 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
 
       Task:
       Generate three structured sections in JSON:
-      1. "responseDraft": A highly targeted response message written in a humble, helpful, expert tone. It must:
-         - Speak directly to the user (e.g. "Hi [Author]" or a platform-appropriate greeting).
-         - Reference their specific situation and details (e.g., their workflow bottleneck, their EHR pain, their zoning headaches).
-         - Proactively offer a specific, free, simple solution template (like a custom Google Sheets formula, a basic copy-pasteable script, or a simple workflow blueprint) to solve their problem immediately for free to build trust.
-         - Mention that you are working on/thinking about a lightweight project to automate this exact bottleneck.
-         - Ask a single, high-intent open-ended question that makes it easy for them to reply.
-         - NO sales talk, NO pricing, NO aggressive call-to-action.
-      2. "suggestedQuestions": An array of 2-3 deep-dive technical/process questions to ask later to understand their problem better.
-      3. "valueAdditionIdeas": An array of 2-3 free things you can do to immediately build goodwill (e.g., "Analyze their custom PDF sample", "Build a 10-second automation script", "Send them a free Google sheet template").
+      1. "responseDraft": A highly targeted outreach message written in a down-to-earth, natural, conversational tone (NO AI buzzwords like 'game-changer', 'leverage', 'seamless', 'revolutionize').
+         - IF THE LEAD IS A MARKETING / WEB AGENCY: Pitch as a discrete, reliable white-label development & automation partner. Emphasize that they can sell custom CRM, API, and automation solutions to their clients under their own brand for high margins while we handle 100% of the build in 48-72 hours with zero dev payroll overhead. Offer a free 5-minute technical review or architecture blueprint of their client's integration to help them close the deal.
+         - IF THE LEAD IS A DIRECT CONTRACTOR / OPERATOR (HVAC, Real Estate, Local Business): Address their direct workflow headache (missed leads, manual spreadsheets, scheduling delays). Proactively offer a specific, free, copy-pasteable solution template or formula, and ask a single friendly open-ended question.
+         - NO hard selling, NO aggressive closing. Keep it casual, helpful, and peer-to-peer.
+      2. "suggestedQuestions": An array of 2-3 deep-dive technical/process questions to ask to understand their problem better.
+      3. "valueAdditionIdeas": An array of 2-3 free things you can do to immediately build goodwill (e.g., "Build a sample webhook blueprint", "Review client API docs", "Send a copy-pasteable script").
 
       Return raw JSON matching this structure:
       {
@@ -1000,9 +1045,6 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
   }
 
   try {
-    const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
-
     const prompt = `
       You are an elite opportunity analyzer for solo developers. You analyze raw forum comments, customer complaints, or business workflow descriptions and extract highly qualified product development signals.
       
@@ -1043,15 +1085,12 @@ app.post("/api/opportunities/analyze-custom", async (req, res) => {
       }
     `;
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
+    const responseText = await generateUnifiedLLM({
+      prompt,
+      responseJson: true
     });
 
-    const text = response.text || "{}";
+    const text = responseText || "{}";
     const parsedData = safeParseJSON(text);
 
     // Supplement metadata
@@ -1149,9 +1188,7 @@ app.post("/api/opportunities/discover", async (req, res) => {
       logTrace("✅ GEMINI_API_KEY detected in server environment.");
     }
 
-    logTrace("Initializing Gemini AI Client...");
-    const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
+    logTrace("Initializing Unified LLM Client...");
 
     let semanticQueries: string[] = [];
     if (isLiteral) {
@@ -1607,17 +1644,14 @@ app.post("/api/opportunities/discover", async (req, res) => {
       }
     `;
 
-    logTrace(`Submitting payload to Gemini Model: "${model}"...`);
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
+    logTrace(`Submitting payload to Unified LLM...`);
+    const responseText = await generateUnifiedLLM({
+      prompt,
+      responseJson: true
     });
 
-    const text = response.text || "[]";
-    logTrace(`Gemini analysis completed. Response length: ${text.length} characters.`);
+    const text = responseText || "[]";
+    logTrace(`AI analysis completed. Response length: ${text.length} characters.`);
 
     let parsedOpps: any[] = [];
     try {
@@ -1744,10 +1778,7 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
       throw new Error("Scraped page has insufficient readable text.");
     }
 
-    console.log(`Scraped ${markdown.length} characters. Analyzing with Gemini...`);
-
-    const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
+    console.log(`Scraped ${markdown.length} characters. Analyzing...`);
 
     const prompt = `
       You are an elite opportunity analyzer and text classifier for solo developers. You analyze raw web page content, forum threads, or customer grievances scraped from the web and extract highly qualified product development signals.
@@ -1788,15 +1819,12 @@ app.post("/api/opportunities/scrape-url", async (req, res) => {
       }
     `;
 
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
+    const responseText = await generateUnifiedLLM({
+      prompt,
+      responseJson: true
     });
 
-    const text = response.text || "{}";
+    const text = responseText || "{}";
     const parsedData = safeParseJSON(text);
 
     const rawOpp = {
@@ -3999,10 +4027,11 @@ app.post("/api/social-campaigns/reject", async (req, res) => {
 app.post("/api/bot-config/trigger-sweep", async (req, res) => {
   try {
     const config = loadBotConfig();
+    const { sector, keyword } = req.body || {};
     if (currentCrawlStatus.active) {
       return res.json({ success: true, message: "Sweep already in progress.", logs: currentCrawlStatus.logs });
     }
-    const promise = executeBotFleetSweep(config);
+    const promise = executeBotFleetSweep(config, { sector, keyword });
     if (!(globalThis as any).__pendingPromises) {
       (globalThis as any).__pendingPromises = [];
     }
@@ -4599,7 +4628,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
           const openAiResult = await callOpenAILLM({
             systemPrompt: pacSystemPrompt,
             prompt: message,
-            history: chatHistory.map((h: any) => ({
+            history: (history || []).map((h: any) => ({
               role: h.role === "pac" || h.role === "assistant" ? "assistant" : "user",
               content: h.text || h.content || ""
             })),

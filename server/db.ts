@@ -44,6 +44,10 @@ export class SimpleCache<T = any> {
   clear(): void {
     this.cache.clear();
   }
+
+  size(): number {
+    return this.cache.size;
+  }
 }
 
 export const apiCache = new SimpleCache<any>(200);

@@ -13,7 +13,7 @@ interface OllamaTunnelModalProps {
 export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: OllamaTunnelModalProps) {
   const [baseUrl, setBaseUrl] = useState("https://your-ollama-tunnel.trycloudflare.com");
   const [model, setModel] = useState("qwen2.5:7b-instruct-q4_k_m");
-  const [provider, setProvider] = useState<"auto" | "ollama" | "gemini">("auto");
+  const [provider, setProvider] = useState<"auto" | "ollama" | "gemini" | "openai">("auto");
 
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -265,6 +265,7 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
                   <option value="auto">Auto-Detect (Use G14 Ollama if online, fallback to Gemini)</option>
                   <option value="ollama">Force G14 / Mac Ollama (Qwen2.5 strictly)</option>
                   <option value="gemini">Force Gemini 3.6 Flash (Cloud API)</option>
+                  <option value="openai">Force OpenAI GPT-4o-Mini (Cloud API)</option>
                 </select>
                 <p className="text-[11px] text-slate-400">
                   Controls which AI engine executes drafting & analysis.
