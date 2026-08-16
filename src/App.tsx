@@ -268,6 +268,33 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Global background crawl status polling & real-time notification
+  const [globalCrawlStatus, setGlobalCrawlStatus] = useState<any>({ active: false });
+  const [crawlNotification, setCrawlNotification] = useState<string | null>(null);
+
+  useEffect(() => {
+    let wasActive = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/crawl/status");
+        if (res.ok) {
+          const data = await res.json();
+          setGlobalCrawlStatus(data);
+          if (data.active) {
+            wasActive = true;
+          } else if (wasActive) {
+            wasActive = false;
+            fetchData();
+            const count = data.foundOppsCount || 0;
+            setCrawlNotification(`✨ Sweep complete! Discovered ${count} new high-pain opportunit${count === 1 ? 'y' : 'ies'}.`);
+            setTimeout(() => setCrawlNotification(null), 9000);
+          }
+        }
+      } catch (e) { }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ==========================================
   // AI PARTNER & SELF-LEARNING EVENT HANDLERS
   // ==========================================
@@ -1030,6 +1057,42 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Live Crawler Fleet Progress Banner (Visible Across All Views) */}
+      {globalCrawlStatus.active && (
+        <div className="bg-gradient-to-r from-cyan-950 via-[#082a72] to-indigo-950 border-b border-cyan-500/30 px-6 py-2.5 flex items-center justify-between shadow-lg text-xs font-mono animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-cyan-300 uppercase tracking-wide">P.A.C. Fleet Active:</span>
+              <span className="text-white">{globalCrawlStatus.progress || "Deep crawling target platform for business problems..."}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-cyan-400">
+            <RefreshCw size={12} className="animate-spin" />
+            <span className="text-[11px]">AI Extraction In-Flight</span>
+          </div>
+        </div>
+      )}
+
+      {/* Sweep Complete Notification Banner */}
+      {crawlNotification && (
+        <div className="bg-gradient-to-r from-emerald-950 via-teal-900 to-emerald-950 border-b border-emerald-500/40 px-6 py-2.5 flex items-center justify-between shadow-lg text-xs font-mono transition-all">
+          <div className="flex items-center gap-2.5 text-emerald-200">
+            <span className="text-base">🎯</span>
+            <span className="font-semibold text-white">{crawlNotification}</span>
+          </div>
+          <button
+            onClick={() => { setActiveView("board"); setCrawlNotification(null); }}
+            className="px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded text-[11px] font-bold transition cursor-pointer"
+          >
+            View on Board →
+          </button>
+        </div>
+      )}
 
       {/* 2. Top Statistics Panel */}
       <section className="grid grid-cols-2 md:grid-cols-6 border-b border-[#93c5fd]/20 bg-[#082a72]/20 divide-x divide-y md:divide-y-0 divide-[#93c5fd]/15">

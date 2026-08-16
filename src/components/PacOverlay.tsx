@@ -593,17 +593,30 @@ export default function PacOverlay({
     const sweepMatch = text.match(/\[ACTION:\s*TRIGGER_SWEEP(?::\s*([^\]]+))?\]/i);
     if (sweepMatch || text.includes("[ACTION: TRIGGER_SWEEP]")) {
       const targetSector = sweepMatch && sweepMatch[1] ? sweepMatch[1].trim() : undefined;
-      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📡 Voice request to run crawler sweeps detected${targetSector ? ` for ${targetSector}` : ""}.`]);
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📡 Request to run crawler sweeps detected${targetSector ? ` for ${targetSector}` : ""}.`]);
       apiFetch("/api/bot-config/trigger-sweep", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sector: targetSector })
       }).then(async (res) => {
         if (res.ok) {
-          const data = await res.json();
-          const count = data.foundOpps ? data.foundOpps.length : 0;
-          onRefreshOpportunities?.();
-          setComputerLogs(prev => [...prev, `[P.A.C. ACTION] Sweep complete! Found ${count} new opportunities.`]);
+          setComputerLogs(prev => [...prev, `[P.A.C. ACTION] Fleet sweep dispatched. Polling live status...`]);
+          const pollTimer = setInterval(async () => {
+            try {
+              const statusRes = await apiFetch("/api/crawl/status");
+              if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                if (!statusData.active) {
+                  clearInterval(pollTimer);
+                  const count = statusData.foundOppsCount || 0;
+                  onRefreshOpportunities?.();
+                  setComputerLogs(prev => [...prev, `[P.A.C. ACTION] Sweep complete! Discovered ${count} new opportunities.`]);
+                }
+              }
+            } catch (e) {
+              clearInterval(pollTimer);
+            }
+          }, 2000);
         }
       }).catch(err => {
         console.error("Failed to run sweep via action tag:", err);
