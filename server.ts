@@ -234,6 +234,34 @@ const ALERTS_FILE = path.join(DB_DIR, "alerts.json");
 const AGENT_MEMORY_FILE = path.join(DB_DIR, "agent-memory.json");
 const COMPUTER_LOGS_FILE = path.join(DB_DIR, "computer-logs.json");
 const SOCIAL_CAMPAIGNS_FILE = path.join(DB_DIR, "social-campaigns.json");
+const ANALYTICS_FILE = path.join(DB_DIR, "analytics.json");
+
+const loadAnalytics = () => {
+  try {
+    const data = safeReadFile(ANALYTICS_FILE, JSON.stringify({
+      totalPageviews: 0,
+      uniqueVisitors: 0,
+      totalAuditsSubmitted: 0,
+      dailyStats: {},
+      referrers: {},
+      recentVisits: []
+    }));
+    return JSON.parse(data);
+  } catch (e) {
+    return {
+      totalPageviews: 0,
+      uniqueVisitors: 0,
+      totalAuditsSubmitted: 0,
+      dailyStats: {},
+      referrers: {},
+      recentVisits: []
+    };
+  }
+};
+
+const saveAnalytics = (data: any) => {
+  safeWriteFile(ANALYTICS_FILE, JSON.stringify(data, null, 2));
+};
 
 const loadSocialCampaigns = (): any[] => {
   try {
@@ -707,7 +735,7 @@ app.delete("/api/opportunities/:id", (req, res) => {
 });
 
 // 4b. Public Lead Form Submission for missedrevenue.org
-app.post("/api/public/submit-lead", (req, res) => {
+app.post("/api/public/submit-lead", async (req, res) => {
   try {
     const {
       businessName,
@@ -742,12 +770,16 @@ app.post("/api/public/submit-lead", (req, res) => {
     const newOpportunity: any = {
       id: newLeadId,
       title: `⚡ INBOUND LEAD: ${bName} (${cName})`,
+      author: cName,
       authorName: cName,
       authorClass: "Business Owner / Decision Maker",
       authorHandle: leadEmail !== "Not provided" ? leadEmail : leadPhone,
-      platform: "Inbound Audit Form (missedrevenue.org)",
-      industry: ind,
+      sourcePlatform: "Inbound Audit Form (missedrevenue.org)",
+      sourceUrl: `https://missedrevenue.org/#audit-${Date.now()}`,
       originalSourceLink: `https://missedrevenue.org/#audit-${Date.now()}`,
+      industry: ind,
+      classification: "help_seeker",
+      problemSummary: bottleneck,
       fullPostText: `INBOUND REVENUE RECOVERY AUDIT REQUEST:
 Business Name: ${bName}
 Contact Person: ${cName}
@@ -763,18 +795,73 @@ ${notes || "None provided"}`,
       detectedProblem: bottleneck,
       commercialIntent: "High",
       painLevel: "High",
+      painLevelExplanation: `Client self-reported severe revenue loss (~$${estMonthlyLoss.toLocaleString()}/mo) from ${bottleneck}.`,
       opportunityScore: 98,
       possibleSolution: `Automated Missed Call Text-Back, AI Lead Nurturing & Auto-Scheduling System for ${bName}`,
-      outreachDraft: `Hi ${cName}, thanks for requesting an AI Revenue Audit for ${bName}. P.A.C. has analyzed your primary bottleneck: "${bottleneck}". We can deploy a 24/7 lead recapture system to stop losing potential ${dealVal} deals. Let's get this connected!`,
+      mvpIdea: `Custom 24/7 lead recapture workflow for ${bName}`,
+      responseDraft: `Hi ${cName}, thanks for requesting an AI Revenue Audit for ${bName}. P.A.C. has analyzed your primary bottleneck: "${bottleneck}". We can deploy a 24/7 lead recapture system to stop losing potential ${dealVal} deals. Let's get this connected!`,
       status: "Inbound Lead",
-      crmNotes: `Submitted on missedrevenue.org at ${new Date().toLocaleString()}`,
+      notes: `Inbound form submitted on missedrevenue.org at ${new Date().toLocaleString()}`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
+    // 1. Save to Opportunity Database & Supabase
     const opps = loadOpportunities();
     opps.unshift(newOpportunity);
     saveOpportunities(opps);
+
+    // 2. Increment analytics stats
+    try {
+      const analytics = loadAnalytics();
+      const today = new Date().toISOString().split("T")[0];
+      analytics.totalAuditsSubmitted = (analytics.totalAuditsSubmitted || 0) + 1;
+      analytics.dailyStats[today] = analytics.dailyStats[today] || { pageviews: 0, leads: 0 };
+      analytics.dailyStats[today].leads = (analytics.dailyStats[today].leads || 0) + 1;
+      saveAnalytics(analytics);
+    } catch (e) { }
+
+    // 3. Inject into P.A.C. Agent Memory & High-Priority Tasks
+    try {
+      const memory = loadAgentMemory();
+      memory.entries = memory.entries || [];
+      memory.followUps = memory.followUps || [];
+      
+      memory.entries.unshift({
+        id: `entry-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        tag: "INBOUND_LEAD",
+        note: `⚡ Hot Inbound Lead from ${bName} (${cName}). Contact: ${leadEmail} / ${leadPhone}. Bottleneck: ${bottleneck}`,
+        prospect: bName
+      });
+
+      memory.followUps.unshift({
+        id: `task-${Date.now()}`,
+        task: `⚡ URGENT: Contact Inbound Lead ${cName} at ${bName} (${leadEmail} / ${leadPhone}) regarding ${dealVal} audit`,
+        completed: false,
+        timestamp: new Date().toISOString()
+      });
+
+      saveAgentMemory(memory);
+    } catch (e) { }
+
+    // 4. Send Instant Push Notification via Telegram Bot
+    const telegramMsg = `🚨 <b>NEW INBOUND REVENUE AUDIT LEAD!</b>\n\n` +
+      `🏢 <b>Business:</b> ${bName}\n` +
+      `👤 <b>Contact:</b> ${cName}\n` +
+      `📧 <b>Email:</b> ${leadEmail}\n` +
+      `📞 <b>Phone:</b> ${leadPhone}\n` +
+      `💼 <b>Industry:</b> ${ind}\n` +
+      `💰 <b>Est. Deal Value:</b> ${dealVal}\n` +
+      `📉 <b>Est. Monthly Loss:</b> ~$${estMonthlyLoss.toLocaleString()}/mo\n\n` +
+      `⚠️ <b>Bottleneck Reported:</b>\n${bottleneck}\n\n` +
+      `💡 <b>P.A.C. Proposed Solution:</b>\n${newOpportunity.possibleSolution}\n\n` +
+      `🎯 <i>Lead is now loaded on your Opportunities Board with a drafted response.</i>`;
+
+    const appUrl = process.env.APP_URL && process.env.APP_URL !== "MY_APP_URL" ? process.env.APP_URL : "https://missedrevenue.org";
+    sendTelegramAlert(telegramMsg, `${appUrl}#opp-${newLeadId}`).catch(err => {
+      console.warn("[Inbound Telegram Alert Error]", err);
+    });
 
     console.log(`[Inbound Audit Request] Saved lead from ${bName} (${cName}) - Lead ID: ${newLeadId}`);
 
@@ -789,6 +876,48 @@ ${notes || "None provided"}`,
     console.error("[Inbound Lead Error]", err);
     res.status(500).json({ error: err.message || "Failed to process lead request." });
   }
+});
+
+// 4c. Public Visitor & Page View Analytics Tracking
+app.post("/api/public/track-visit", (req, res) => {
+  try {
+    const { referrer, path: pagePath } = req.body || {};
+    const analytics = loadAnalytics();
+    const today = new Date().toISOString().split("T")[0];
+
+    analytics.totalPageviews = (analytics.totalPageviews || 0) + 1;
+    analytics.dailyStats[today] = analytics.dailyStats[today] || { pageviews: 0, leads: 0 };
+    analytics.dailyStats[today].pageviews = (analytics.dailyStats[today].pageviews || 0) + 1;
+
+    let refHost = "Direct / Bookmark";
+    if (referrer && typeof referrer === "string" && referrer !== "direct" && referrer.startsWith("http")) {
+      try {
+        refHost = new URL(referrer).hostname;
+      } catch (e) {
+        refHost = referrer.substring(0, 30);
+      }
+    }
+    analytics.referrers[refHost] = (analytics.referrers[refHost] || 0) + 1;
+
+    if (!Array.isArray(analytics.recentVisits)) analytics.recentVisits = [];
+    analytics.recentVisits.unshift({
+      timestamp: new Date().toISOString(),
+      referrer: refHost,
+      path: pagePath || "/"
+    });
+    analytics.recentVisits = analytics.recentVisits.slice(0, 50);
+
+    saveAnalytics(analytics);
+    res.json({ success: true, pageviews: analytics.totalPageviews });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 4d. Get Public Analytics for Founder Dashboard
+app.get("/api/public/analytics", (req, res) => {
+  const analytics = loadAnalytics();
+  res.json(analytics);
 });
 
 // ==========================================

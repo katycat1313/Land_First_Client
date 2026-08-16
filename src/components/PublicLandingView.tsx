@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Sparkles, DollarSign, PhoneCall, MessageSquare, Calendar, 
   ShieldCheck, Cpu, ArrowRight, Lock, Unlock, CheckCircle2, 
@@ -17,6 +17,20 @@ export default function PublicLandingView({
   isUnlocked,
   onSwitchToDashboard
 }: PublicLandingViewProps) {
+  // Automatic anonymous page view / visitor analytics tracking
+  useEffect(() => {
+    try {
+      fetch("/api/public/track-visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          referrer: document.referrer || "direct",
+          path: window.location.pathname || "/"
+        })
+      }).catch(() => {});
+    } catch (e) { }
+  }, []);
+
   // Calculator states
   const [industry, setIndustry] = useState("HVAC / Plumbing / Electrical");
   const [ticketSize, setTicketSize] = useState<number>(1800);
