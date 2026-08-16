@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { getGeminiClient, llmConfig, safeParseJSON } from "./llm";
+import { getGeminiClient, llmConfig, safeParseJSON, generateUnifiedLLM } from "./llm";
 import { DB_FILE, ALERTS_FILE, saveOpportunities, safeReadFile, safeWriteFile, loadOpportunities } from "./db";
 
 dotenv.config();
@@ -619,12 +619,11 @@ export async function executeBotFleetSweep(config: any): Promise<{ logs: string[
                   "valueAdditionIdeas": ["Idea 1"]
                 }]
               `;
-              const response = await ai.models.generateContent({
-                model: "gemini-3.6-flash",
-                contents: prompt,
-                config: { responseMimeType: "application/json" }
+              const responseText = await generateUnifiedLLM({
+                prompt: prompt,
+                responseJson: true
               });
-              const parsed = safeParseJSON(response.text || "[]");
+              const parsed = safeParseJSON(responseText || "[]");
               if (Array.isArray(parsed) && parsed.length > 0) {
                 for (const opp of parsed) {
                   opp.id = `discovered-discord-${Date.now()}`;
@@ -685,12 +684,11 @@ export async function executeBotFleetSweep(config: any): Promise<{ logs: string[
                 "valueAdditionIdeas": ["Idea 1"]
               }]
             `;
-            const response = await ai.models.generateContent({
-              model: "gemini-3.6-flash",
-              contents: prompt,
-              config: { responseMimeType: "application/json" }
+            const responseText = await generateUnifiedLLM({
+              prompt: prompt,
+              responseJson: true
             });
-            const extracted = safeParseJSON(response.text || "[]");
+            const extracted = safeParseJSON(responseText || "[]");
             if (Array.isArray(extracted) && extracted.length > 0) {
               for (const opp of extracted) {
                 if (opp.sourceUrl && opp.sourceUrl.includes("reddit.com")) {
@@ -751,12 +749,11 @@ export async function executeBotFleetSweep(config: any): Promise<{ logs: string[
                 "valueAdditionIdeas": ["Idea 1"]
               }]
             `;
-            const response = await ai.models.generateContent({
-              model: "gemini-3.6-flash",
-              contents: prompt,
-              config: { responseMimeType: "application/json" }
+            const responseText = await generateUnifiedLLM({
+              prompt: prompt,
+              responseJson: true
             });
-            const extracted = safeParseJSON(response.text || "[]");
+            const extracted = safeParseJSON(responseText || "[]");
             if (Array.isArray(extracted) && extracted.length > 0) {
               for (const opp of extracted) {
                 opp.id = `discovered-forum-${Date.now()}`;
