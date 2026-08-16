@@ -220,11 +220,25 @@ export async function callOllamaLLM({
     bodyPayload.format = "json";
   }
 
-  const response = await fetchWithRetry(`${targetBaseUrl}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(bodyPayload)
-  });
+  let response;
+  try {
+    response = await fetchWithRetry(`${targetBaseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyPayload)
+    });
+  } catch (err: any) {
+    if (targetBaseUrl !== "http://localhost:11434") {
+      console.warn(`[Ollama Call] Target tunnel URL failed (${err.message}). Retrying on local fallback: http://localhost:11434...`);
+      response = await fetchWithRetry(`http://localhost:11434/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bodyPayload)
+      });
+    } else {
+      throw err;
+    }
+  }
 
   if (!response.ok) {
     const errText = await response.text();
