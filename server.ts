@@ -5115,6 +5115,7 @@ app.post("/api/deepgram/setup", async (req, res) => {
 
 // Vite / Static Assets configuration
 const isWorker = typeof globalThis.WebSocketPair !== "undefined";
+console.log(`[Static Configuration] isWorker: ${isWorker}, NODE_ENV: ${process.env.NODE_ENV}`);
 
 if (!isWorker && process.env.NODE_ENV !== "production") {
   const viteModule = "vite";
@@ -5122,7 +5123,22 @@ if (!isWorker && process.env.NODE_ENV !== "production") {
   const { createServer: createViteServer } = await import(viteModule);
   const vite = await createViteServer({
     server: { middlewareMode: true },
-    appType: "spa",
+    appType: "custom",
+  });
+  app.use(async (req, res, next) => {
+    const url = req.originalUrl;
+    if (req.headers.accept?.includes("text/html")) {
+      console.log(`[Dev HTML Catch] Handling: "${url}"`);
+      try {
+        let template = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8");
+        template = await vite.transformIndexHtml(url, template);
+        return res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        return next(e);
+      }
+    }
+    next();
   });
   app.use(vite.middlewares);
 } else {
