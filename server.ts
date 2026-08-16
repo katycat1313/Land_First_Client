@@ -632,6 +632,24 @@ const BOT_CONFIG_FILE = path.join(DB_DIR, "bot-config.json");
 const ALERTS_FILE = path.join(DB_DIR, "alerts.json");
 const AGENT_MEMORY_FILE = path.join(DB_DIR, "agent-memory.json");
 const COMPUTER_LOGS_FILE = path.join(DB_DIR, "computer-logs.json");
+const SOCIAL_CAMPAIGNS_FILE = path.join(DB_DIR, "social-campaigns.json");
+
+const loadSocialCampaigns = (): any[] => {
+  try {
+    const data = safeReadFile(SOCIAL_CAMPAIGNS_FILE, "[]");
+    return JSON.parse(data);
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveSocialCampaigns = (data: any[]) => {
+  saveToMemoryAndBackup(SOCIAL_CAMPAIGNS_FILE, JSON.stringify(data, null, 2));
+};
+
+function saveToMemoryAndBackup(filePath: string, content: string): void {
+  safeWriteFile(filePath, content);
+}
 
 // Memory cache fallback for read-only environments like Cloudflare Workers
 const memoryDBCache: Record<string, string> = {};
@@ -6385,6 +6403,154 @@ app.post("/api/bot-config", (req, res) => {
   saveBotConfig(req.body);
   initScheduler(); // Hot-reload the background scheduler daemon!
   res.json({ success: true, config: req.body });
+});
+
+// GET /api/social-campaigns
+app.get("/api/social-campaigns", (req, res) => {
+  try {
+    const list = loadSocialCampaigns();
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to load campaigns." });
+  }
+});
+
+// POST /api/social-campaigns/generate
+app.post("/api/social-campaigns/generate", async (req, res) => {
+  try {
+    const opportunities = loadOpportunities();
+    const activeOppsSummary = opportunities
+      .slice(0, 5)
+      .map(o => `- ${o.title} (Industry: ${o.industry}, Pain: ${o.problemSummary})`)
+      .join("\n");
+
+    const systemPrompt = `
+      You are P.A.C., a world-class B2B Growth Strategy and Lead Sales partner. 
+      Your task is to plan a highly authentic, 7-day social media campaign to drive organic traffic to our agency landing page (focused on automating business operations, workflow integrations, and custom CRM tools for micro-businesses).
+      
+      TONE DIRECTIVES (ZERO AI BUZZWORDS):
+      - Write all post content in a warm, relaxed, conversational, down-to-earth human voice.
+      - Imagine speaking casually off-the-cuff over coffee to another founder.
+      - NEVER use corporate jargon: "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "testament".
+      - Strictly NO markdown bold (**) or asterisks in the final post contents.
+      
+      POST STRATEGY:
+      - Share practical advice, real case-studies or operational struggles (e.g. manual spreadsheets, lost HVAC leads, accounts receivable delays) that connect directly to our capabilities.
+      - Platforms can include: LinkedIn, Twitter/X, Reddit (as a helpful comment style), Facebook Groups, or Discourse.
+      - Provide a descriptive "imagePrompt" for each post. The prompt should specify a professional illustrative graphic, visual dashboard mockup, or diagram suitable for generating via an AI image generator.
+    `;
+
+    const prompt = `
+      Based on our current top B2B opportunities:\n${activeOppsSummary || "No active leads yet. Focus generally on HVAC, roofing, and marketing agency billing automation."}
+      
+      Generate a 7-day social posting campaign starting from today (${new Date().toISOString().split("T")[0]}).
+      
+      Format your response as a strict JSON array of objects matching this exact structure:
+      [{
+        "id": "post_1",
+        "platform": "LinkedIn",
+        "scheduledDate": "YYYY-MM-DD",
+        "content": "Full post text here...",
+        "imagePrompt": "Detailed illustrative image prompt here...",
+        "status": "Pending Approval"
+      }]
+    `;
+
+    console.log("[Social Campaigns] Generating 7-day campaign via Unified LLM...");
+    const rawResult = await generateUnifiedLLM({
+      systemPrompt,
+      prompt,
+      responseJson: true,
+      temperature: 0.8
+    });
+
+    const parsed = JSON.parse(rawResult);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      saveSocialCampaigns(parsed);
+      return res.json({ success: true, posts: parsed });
+    }
+    throw new Error("Invalid or empty response format from LLM.");
+  } catch (err: any) {
+    console.error("[Social Campaigns Exception]:", err);
+    res.status(500).json({ error: err.message || "Failed to generate campaign drafts." });
+  }
+});
+
+// POST /api/social-campaigns/approve
+app.post("/api/social-campaigns/approve", (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: "Post ID is required." });
+
+  try {
+    const list = loadSocialCampaigns();
+    const index = list.findIndex(p => p.id === id);
+    if (index === -1) return res.status(404).json({ error: "Post not found." });
+
+    list[index].status = "Approved";
+    saveSocialCampaigns(list);
+    res.json({ success: true, post: list[index] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/social-campaigns/reject
+app.post("/api/social-campaigns/reject", async (req, res) => {
+  const { id, feedback } = req.body;
+  if (!id) return res.status(400).json({ error: "Post ID is required." });
+
+  try {
+    const list = loadSocialCampaigns();
+    const index = list.findIndex(p => p.id === id);
+    if (index === -1) return res.status(404).json({ error: "Post not found." });
+
+    console.log(`[Social Campaigns] Rejecting post ${id} with feedback: "${feedback || 'None'}"`);
+
+    // Regenerate this specific post
+    const systemPrompt = `
+      You are P.A.C., B2B Growth Strategy partner. Your user has REJECTED the social media draft you wrote for platform ${list[index].platform}.
+      You MUST rewrite this post completely, strictly addressing the user's feedback and ensuring a high-quality human tone.
+      
+      TONE DIRECTIVES:
+      - Clean, warm, conversational, down-to-earth human voice.
+      - NO AI buzzwords. NO markdown bold (**).
+      - Make the visual image prompt crisp and professional.
+    `;
+
+    const prompt = `
+      Original Post Content: "${list[index].content}"
+      Original Image Prompt: "${list[index].imagePrompt}"
+      
+      User Rejection Feedback: "${feedback || "Please write a fresh, different angle that is more practical and conversational."}"
+      
+      Generate a rewritten post matching this exact JSON format:
+      {
+        "content": "Rewritten post text here...",
+        "imagePrompt": "Rewritten illustrative image prompt here..."
+      }
+    `;
+
+    const rawResult = await generateUnifiedLLM({
+      systemPrompt,
+      prompt,
+      responseJson: true,
+      temperature: 0.9
+    });
+
+    const parsed = JSON.parse(rawResult);
+    if (parsed && parsed.content) {
+      list[index].content = parsed.content;
+      list[index].imagePrompt = parsed.imagePrompt || list[index].imagePrompt;
+      list[index].status = "Pending Approval"; // Reset status to let the user review it again
+      list[index].notes = feedback ? `Regenerated based on feedback: ${feedback}` : "Regenerated draft.";
+      saveSocialCampaigns(list);
+      return res.json({ success: true, post: list[index] });
+    }
+    throw new Error("Invalid output format from LLM.");
+  } catch (err: any) {
+    console.error("[Social Campaigns Rewrite Exception]:", err);
+    res.status(500).json({ error: err.message || "Failed to rewrite post." });
+  }
 });
 
 // POST /api/bot-config/trigger-sweep

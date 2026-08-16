@@ -40,7 +40,11 @@ export default function PacOverlay({
   // UI state
   const [isOpen, setIsOpen] = useState(true);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "computer" | "spar" | "review" | "memory">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "computer" | "spar" | "review" | "memory" | "campaigns">("chat");
+  const [campaignPosts, setCampaignPosts] = useState<any[]>([]);
+  const [isLoadingCampaign, setIsLoadingCampaign] = useState(false);
+  const [rejectionFeedbacks, setRejectionFeedbacks] = useState<Record<string, string>>({});
+  const [regeneratingPostId, setRegeneratingPostId] = useState<string | null>(null);
   const [activeDocument, setActiveDocument] = useState<{
     type: "outreach" | "proposal" | "contract";
     title: string;
@@ -233,6 +237,87 @@ export default function PacOverlay({
     };
     fetchAgentMemory();
   }, []);
+
+  // Load social campaigns on mount
+  useEffect(() => {
+    const fetchSocialCampaigns = async () => {
+      try {
+        const res = await apiFetch("/api/social-campaigns");
+        if (res.ok) {
+          const data = await res.json();
+          setCampaignPosts(data);
+        }
+      } catch (err) {
+        console.error("Failed to load social campaigns:", err);
+      }
+    };
+    fetchSocialCampaigns();
+  }, []);
+
+  const handleGenerateCampaign = async () => {
+    setIsLoadingCampaign(true);
+    setComputerLogs(prev => [...prev, "[CAMPAIGN-GEN] Planning a fresh 7-day social campaign draft..."]);
+    try {
+      const res = await apiFetch("/api/social-campaigns/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCampaignPosts(data.posts || []);
+        setComputerLogs(prev => [...prev, "[CAMPAIGN-GEN] Successfully generated a 7-day social campaign plan!"]);
+      } else {
+        const errData = await res.json();
+        setComputerLogs(prev => [...prev, `[CAMPAIGN-GEN] ❌ Generation failed: ${errData.error || res.statusText}`]);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setComputerLogs(prev => [...prev, `[CAMPAIGN-GEN] ❌ Error: ${err.message}`]);
+    } finally {
+      setIsLoadingCampaign(false);
+    }
+  };
+
+  const handleApprovePost = async (id: string) => {
+    setComputerLogs(prev => [...prev, `[CAMPAIGN] Approving social post: ${id}...`]);
+    try {
+      const res = await apiFetch("/api/social-campaigns/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCampaignPosts(prev => prev.map(p => p.id === id ? data.post : p));
+        setComputerLogs(prev => [...prev, `[CAMPAIGN] Post ${id} APPROVED and scheduled!`]);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRejectPost = async (id: string) => {
+    const feedback = rejectionFeedbacks[id] || "";
+    setRegeneratingPostId(id);
+    setComputerLogs(prev => [...prev, `[CAMPAIGN] Rejecting post ${id}. Feedback: "${feedback}". Re-generating...`]);
+    try {
+      const res = await apiFetch("/api/social-campaigns/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, feedback })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCampaignPosts(prev => prev.map(p => p.id === id ? data.post : p));
+        setRejectionFeedbacks(prev => ({ ...prev, [id]: "" })); // clear input
+        setComputerLogs(prev => [...prev, `[CAMPAIGN] Post ${id} successfully re-generated! Ready for review.`]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setRegeneratingPostId(null);
+    }
+  };
 
   // ----------------------------------------------------
   // SILENT SUBSYSTEM DIAGNOSTICS & ABILITIES CHECK
@@ -2925,18 +3010,19 @@ registerProcessor('pcm-processor', PCMProcessor);
             </div>
           )}
           {/* Menu Tabs */}
-          <div className="flex border-b border-slate-900 bg-slate-900/40 text-center font-mono">
+          <div className="flex border-b border-slate-900 bg-slate-900/40 text-center font-mono overflow-x-auto whitespace-nowrap scrollbar-none">
             {[
               { id: "chat", label: "💬 Brainstorm" },
               { id: "computer", label: "🖥️ Computer" },
               { id: "spar", label: "🥊 Coaching" },
               { id: "review", label: `📄 Review${activeDocument ? " 🔴" : ""}` },
-              { id: "memory", label: "🧠 Memory" }
+              { id: "memory", label: "🧠 Memory" },
+              { id: "campaigns", label: "📢 Campaigns" }
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex-1 py-2 text-[10px] font-bold uppercase border-b-2 transition ${activeTab === tab.id
+                className={`px-3 py-2 text-[10px] font-bold uppercase border-b-2 transition shrink-0 ${activeTab === tab.id
                     ? "border-cyan-500 text-white bg-slate-950/20"
                     : "border-transparent text-slate-500 hover:text-slate-300"
                   }`}
@@ -3592,6 +3678,196 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                     </div>
                   </div>
 
+                </div>
+              </div>
+            )}
+
+
+            {/* SOCIAL CAMPAIGNS TAB */}
+            {activeTab === "campaigns" && (
+              <div className="flex flex-col h-[520px] bg-slate-950/40 rounded-xl border border-slate-900 overflow-hidden">
+                {/* Header Actions */}
+                <div className="p-3 bg-slate-900/60 border-b border-slate-900 flex items-center justify-between shrink-0">
+                  <div>
+                    <h3 className="text-xs font-bold text-white font-mono flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                      </span>
+                      B2B Organic Social Campaigns
+                    </h3>
+                    <p className="text-[9px] text-slate-500 font-mono mt-0.5">
+                      Generate authentic, jargon-free thought leadership to drive inbound leads.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleGenerateCampaign}
+                    disabled={isLoadingCampaign}
+                    className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg cursor-pointer"
+                    type="button"
+                  >
+                    {isLoadingCampaign ? (
+                      <>
+                        <span className="h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Drafting Week...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={11} /> Plan 7-Day Campaign
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Campaign Posts List */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-4 scrollbar-thin">
+                  {campaignPosts.length > 0 ? (
+                    campaignPosts.map((post, idx) => (
+                      <div
+                        key={post.id}
+                        className={`p-3 bg-slate-900/80 border rounded-xl space-y-3 transition duration-200 hover:border-slate-800 ${
+                          post.status === "Approved"
+                            ? "border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.03)]"
+                            : post.status === "Rejected"
+                            ? "border-rose-500/20"
+                            : "border-slate-800/80"
+                        }`}
+                      >
+                        {/* Post Header Card */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">
+                              Day {idx + 1}
+                            </span>
+                            <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded font-mono ${
+                              post.platform === "LinkedIn" ? "bg-blue-900/30 text-blue-400 border border-blue-800/30" :
+                              post.platform === "Twitter/X" || post.platform === "Twitter" ? "bg-slate-950 text-white border border-slate-800" :
+                              post.platform === "Reddit" ? "bg-orange-950/30 text-orange-400 border border-orange-900/30" :
+                              "bg-indigo-950/30 text-indigo-400 border border-indigo-900/30"
+                            }`}>
+                              {post.platform}
+                            </span>
+                            <span className="text-[9.5px] text-slate-500 font-mono">
+                              {post.scheduledDate}
+                            </span>
+                          </div>
+
+                          {/* Status Badge */}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`relative flex h-1.5 w-1.5 ${post.status === "Approved" ? "bg-emerald-400" : "bg-amber-400"} rounded-full`}>
+                              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${post.status === "Approved" ? "bg-emerald-400" : "bg-amber-400"}`}></span>
+                              <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${post.status === "Approved" ? "bg-emerald-500" : "bg-amber-500"}`}></span>
+                            </span>
+                            <span className={`text-[9px] font-mono font-semibold ${post.status === "Approved" ? "text-emerald-400" : "text-amber-400"}`}>
+                              {post.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Content text */}
+                        <div className="space-y-2">
+                          <label className="text-[8.5px] uppercase tracking-wider text-slate-500 font-mono block">Post Draft</label>
+                          <textarea
+                            value={post.content}
+                            onChange={(e) => {
+                              const updated = campaignPosts.map(p => p.id === post.id ? { ...p, content: e.target.value } : p);
+                              setCampaignPosts(updated);
+                            }}
+                            className="w-full min-h-[90px] p-2 bg-slate-950 border border-slate-850 focus:border-cyan-500/50 rounded-lg text-[11px] text-slate-200 focus:outline-none font-mono resize-none leading-relaxed"
+                          />
+                        </div>
+
+                        {/* Visual Image & Prompt Section */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/50 p-2.5 rounded-lg border border-slate-900">
+                          <div className="space-y-2">
+                            <label className="text-[8.5px] uppercase tracking-wider text-slate-500 font-mono block">Image Prompt (Visuals)</label>
+                            <textarea
+                              value={post.imagePrompt}
+                              onChange={(e) => {
+                                const updated = campaignPosts.map(p => p.id === post.id ? { ...p, imagePrompt: e.target.value } : p);
+                                setCampaignPosts(updated);
+                              }}
+                              className="w-full h-[80px] p-2 bg-slate-950 border border-slate-850 focus:border-cyan-500/50 rounded-lg text-[10px] text-slate-400 focus:outline-none font-mono resize-none leading-normal"
+                            />
+                          </div>
+                          
+                          {/* Image rendering using Pollinations AI */}
+                          <div className="relative h-[110px] rounded-lg overflow-hidden border border-slate-850 bg-slate-950 flex items-center justify-center">
+                            {post.imagePrompt ? (
+                              <img
+                                src={`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=400&height=250&nologo=true&private=true`}
+                                alt={post.platform}
+                                className="w-full h-full object-cover transition-opacity duration-300 hover:scale-105"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="text-[9px] text-slate-600 font-mono text-center">No image planned</div>
+                            )}
+                            <div className="absolute bottom-1 right-1 bg-slate-900/80 px-1.5 py-0.5 rounded text-[8px] text-slate-400 font-mono border border-slate-800">
+                              Generated Asset
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions (Approve / Reject Loop) */}
+                        <div className="flex gap-2 items-center justify-between border-t border-slate-900/60 pt-2.5">
+                          {/* Rejection Loop Box */}
+                          <div className="flex-1 flex gap-1.5 mr-2">
+                            <input
+                              type="text"
+                              placeholder="Type feedback if you want to rewrite/reject..."
+                              value={rejectionFeedbacks[post.id] || ""}
+                              onChange={(e) => setRejectionFeedbacks(prev => ({ ...prev, [post.id]: e.target.value }))}
+                              className="flex-1 px-2.5 py-1 bg-slate-950 border border-slate-850 rounded text-[10px] text-slate-300 focus:outline-none focus:border-rose-500/40 font-mono placeholder-slate-700"
+                            />
+                            <button
+                              onClick={() => handleRejectPost(post.id)}
+                              disabled={regeneratingPostId === post.id}
+                              className="px-2.5 py-1 bg-rose-950/40 hover:bg-rose-900/40 border border-rose-900/30 text-rose-400 rounded text-[10px] font-bold font-mono transition flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              type="button"
+                            >
+                              {regeneratingPostId === post.id ? (
+                                <>
+                                  <span className="h-2 w-2 border border-rose-400 border-t-transparent rounded-full animate-spin"></span>
+                                  Rewriting...
+                                </>
+                              ) : (
+                                "Reject & Rewrite"
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Approval Trigger */}
+                          {post.status !== "Approved" && (
+                            <button
+                              onClick={() => handleApprovePost(post.id)}
+                              className="px-3.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1 cursor-pointer shrink-0"
+                              type="button"
+                            >
+                              Approve Post
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-center py-16 space-y-3 bg-slate-900/20 border border-dashed border-slate-800 rounded-xl">
+                      <span className="text-2xl">📢</span>
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-slate-300 font-mono">No Campaigns Active</h4>
+                        <p className="text-[9.5px] text-slate-600 font-mono max-w-[240px]">
+                          Get organic traffic crawling to your landing page. Plan a 7-day social campaign!
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleGenerateCampaign}
+                        className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[9.5px] font-bold font-mono transition cursor-pointer"
+                        type="button"
+                      >
+                        Plan 7-Day Campaign
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
