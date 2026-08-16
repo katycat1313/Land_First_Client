@@ -253,6 +253,57 @@ export default function App() {
     });
   }, []);
 
+  // Automated Daily Morning Sweep: Runs exactly once per day on initial app open
+  useEffect(() => {
+    const triggerDailySweepIfFirstOpen = async () => {
+      try {
+        const todayStr = new Date().toISOString().split("T")[0]; // e.g. "2026-08-16"
+        const lastSweepDate = localStorage.getItem("last_daily_sweep_date");
+
+        if (lastSweepDate !== todayStr) {
+          localStorage.setItem("last_daily_sweep_date", todayStr);
+          console.log(`[Daily Auto-Sweep] First open of the day (${todayStr}). Dispatching automated morning discovery sweep...`);
+
+          // Check if crawl is already running
+          const statusRes = await fetch("/api/crawl/status");
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.active) {
+              console.log("[Daily Auto-Sweep] Sweep already in progress. Skipping duplicate dispatch.");
+              return;
+            }
+          }
+
+          // Trigger automated morning sweep targeting high-priority marketing agencies & contractors
+          const reqHeaders = getAuthHeaders({ "Content-Type": "application/json" });
+          const triggerRes = await fetch("/api/bot-config/trigger-sweep", {
+            method: "POST",
+            headers: reqHeaders,
+            body: JSON.stringify({
+              sector: "Marketing agency",
+              keyword: "CRM webhook automation workflow",
+              platform: "Reddit"
+            })
+          });
+
+          if (triggerRes.ok) {
+            setCrawlNotification("🌅 Good morning! P.A.C. Daily Morning Sweep initiated to discover today's top opportunities...");
+            setTimeout(() => setCrawlNotification(null), 9000);
+          }
+        }
+      } catch (err) {
+        console.error("[Daily Auto-Sweep] Error triggering morning sweep:", err);
+      }
+    };
+
+    // Trigger after initial app load settles
+    const timer = setTimeout(() => {
+      triggerDailySweepIfFirstOpen();
+    }, 2500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   // Listen for Google Auth changes and restore session
   useEffect(() => {
     const unsubscribe = initAuth(
