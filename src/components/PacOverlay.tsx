@@ -3566,44 +3566,60 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
 
                       <button
                         onClick={async () => {
-                          // 1. Copy draft to clipboard
+                          // 1. Calculate destination URL first synchronously
+                          const isReddit = activeDocument.targetPlatform?.includes("Reddit") || 
+                            activeDocument.title?.toLowerCase().includes("reddit") || 
+                            (activeDocument.targetUrl && activeDocument.targetUrl.includes("reddit.com")) ||
+                            Boolean(activeDocument.targetAuthor);
+
+                          let cleanAuthor = (activeDocument.targetAuthor || "").replace(/^u\//, "");
+                          if (cleanAuthor === "[deleted]") cleanAuthor = "";
+
+                          let destinationUrl = "";
+                          if (isReddit && cleanAuthor) {
+                            destinationUrl = `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your post: " + (activeDocument.title || "workflow bottleneck"))}&message=${encodeURIComponent(activeDocument.content)}`;
+                          } else if (activeDocument.targetUrl && activeDocument.targetUrl.startsWith("http")) {
+                            destinationUrl = activeDocument.targetUrl;
+                          } else {
+                            destinationUrl = "https://www.reddit.com/message/compose/";
+                          }
+
+                          // 2. Open window SYNCHRONOUSLY before any async operations to prevent browser popup blocking
+                          window.open(destinationUrl, '_blank');
+
+                          // 3. Copy draft to clipboard
                           try {
                             await navigator.clipboard.writeText(activeDocument.content);
                           } catch (e) {}
 
-                          // 2. Open destination URL / Reddit message composer in a new tab
-                          let destinationOpened = false;
-                          const isReddit = activeDocument.targetPlatform?.includes("Reddit") || activeDocument.title?.toLowerCase().includes("reddit") || (activeDocument.targetUrl && activeDocument.targetUrl.includes("reddit.com"));
-
-                          if (isReddit && activeDocument.targetAuthor && activeDocument.targetAuthor !== "[deleted]") {
-                            const cleanAuthor = activeDocument.targetAuthor.replace(/^u\//, "");
-                            const pmUrl = `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your post: " + (activeDocument.title || "workflow bottleneck"))}&message=${encodeURIComponent(activeDocument.content)}`;
-                            window.open(pmUrl, '_blank');
-                            destinationOpened = true;
-                          } else if (activeDocument.targetUrl && activeDocument.targetUrl.startsWith("http")) {
-                            window.open(activeDocument.targetUrl, '_blank');
-                            destinationOpened = true;
-                          }
-
-                          // 3. Mark opportunity as Contacted in CRM
+                          // 4. Mark opportunity as Contacted & save outreachProof in CRM
                           if (activeDocument.opportunityId) {
                             try {
                               await apiFetch(`/api/opportunities/${activeDocument.opportunityId}`, {
                                 method: "PATCH",
                                 headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ status: "Contacted", notes: `Outreach approved on ${new Date().toLocaleDateString()}` })
+                                body: JSON.stringify({ 
+                                  status: "Contacted", 
+                                  notes: `Outreach approved & launched on ${new Date().toLocaleDateString()}`,
+                                  outreachProof: {
+                                    platform: isReddit ? "Reddit" : (activeDocument.targetPlatform || "Web"),
+                                    recipient: cleanAuthor || "Author",
+                                    messageText: activeDocument.content,
+                                    sentAt: new Date().toISOString()
+                                  }
+                                })
                               });
                               if (onRefreshOpportunities) onRefreshOpportunities();
                             } catch (e) {}
                           }
 
-                          // 4. Log in console
+                          // 5. Log in console
                           setComputerLogs(prev => [
                             ...prev,
-                            `[CRM] Approved outreach draft! Copied to clipboard and ${destinationOpened ? "opened live platform in your browser." : "ready to paste."}`
+                            `[CRM] Approved outreach draft! Copied to clipboard and opened ${destinationUrl} in your browser.`
                           ]);
 
-                          alert(`📋 Outreach draft copied to clipboard!\n\n${destinationOpened ? "Opened Reddit/platform in a new browser tab for you to review and hit Send." : "Paste directly into your message window to send."}`);
+                          alert(`📋 Outreach draft copied to clipboard!\n\nOpened Reddit/platform in a new browser tab for you to review and hit Send.`);
 
                           setActiveDocument(null);
                           setActiveTab("chat");

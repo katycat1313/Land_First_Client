@@ -4,7 +4,8 @@ import {
   X, ExternalLink, Copy, Check, Sparkles, 
   Layers, Lightbulb, ShieldAlert, Award, Calendar, RefreshCw, 
   Flame, Gauge, DollarSign, PenTool, ClipboardList, HelpCircle,
-  MessageSquare, Send, Mail, User, ArrowUp, ArrowDown, Share2, Bookmark
+  MessageSquare, Send, Mail, User, ArrowUp, ArrowDown, Share2, Bookmark,
+  Camera, Image, Upload
 } from "lucide-react";
 import { User as FirebaseUser } from "firebase/auth";
 import { fetchGmailThread, sendGmailEmail } from "../utils/gmailApi";
@@ -44,6 +45,7 @@ export default function OpportunityCardDetail({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isLoggingMessage, setIsLoggingMessage] = useState(false);
   const [logSuccess, setLogSuccess] = useState(false);
+  const [proofScreenshot, setProofScreenshot] = useState<string | undefined>(opportunity.outreachProof?.screenshotUrl);
 
   // Gmail REST integration states
   const [recipientEmail, setRecipientEmail] = useState(opportunity.gmailSentTo || "");
@@ -308,7 +310,14 @@ export default function OpportunityCardDetail({
         followUpDate: followUpDate || undefined,
         responseDraft: draft,
         suggestedQuestions: questions,
-        valueAdditionIdeas: valueIdeas
+        valueAdditionIdeas: valueIdeas,
+        outreachProof: (opportunity.outreachProof || proofScreenshot) ? {
+          platform: opportunity.outreachProof?.platform || opportunity.sourcePlatform,
+          recipient: opportunity.outreachProof?.recipient || opportunity.author,
+          messageText: opportunity.outreachProof?.messageText || draft,
+          sentAt: opportunity.outreachProof?.sentAt || new Date().toISOString(),
+          screenshotUrl: proofScreenshot
+        } : undefined
       };
       await onSave(updatedOpp);
       setSaveSuccess(true);
@@ -1300,6 +1309,77 @@ export default function OpportunityCardDetail({
                   placeholder="e.g. 'Emailed Sarah on 7/8. Waiting on sample forms to inspect tabular layout.'"
                   className="w-full h-20 p-2 bg-slate-900 border border-slate-800 rounded text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 resize-none"
                 />
+              </div>
+
+              {/* Verified Outreach Proof & Screenshot Audit Box */}
+              <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10.5px] font-bold text-slate-200 flex items-center gap-1.5 font-mono">
+                    <Camera size={12} className="text-emerald-400" />
+                    Verified Outreach Proof & Screenshot Audit
+                  </span>
+                  {opportunity.outreachProof?.sentAt && (
+                    <span className="text-[9px] text-emerald-400 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/40">
+                      Logged {new Date(opportunity.outreachProof.sentAt).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+
+                {opportunity.outreachProof?.messageText ? (
+                  <div className="p-2 bg-slate-900 rounded border border-slate-800 text-[10.5px] font-mono text-slate-300 space-y-1">
+                    <div className="flex items-center justify-between text-[9px] text-slate-500">
+                      <span>To: @{opportunity.outreachProof.recipient} ({opportunity.outreachProof.platform})</span>
+                    </div>
+                    <p className="line-clamp-3 leading-relaxed">{opportunity.outreachProof.messageText}</p>
+                  </div>
+                ) : (
+                  <p className="text-[9.5px] text-slate-500 font-mono">
+                    When you click "Launch Direct PM on Reddit" or approve outreach, the exact message and timestamp are recorded here for your audit records.
+                  </p>
+                )}
+
+                {/* Screenshot Viewer & Uploader */}
+                <div className="space-y-1.5">
+                  {proofScreenshot ? (
+                    <div className="relative rounded-lg overflow-hidden border border-slate-700 bg-black/40 group max-h-48 flex items-center justify-center">
+                      <img 
+                        src={proofScreenshot} 
+                        alt="Outreach Verification Screenshot" 
+                        className="w-full h-auto max-h-48 object-contain cursor-pointer"
+                        onClick={() => {
+                          const w = window.open("");
+                          w?.document.write(`<img src="${proofScreenshot}" style="max-width:100%;height:auto;" />`);
+                        }}
+                      />
+                      <button
+                        onClick={() => setProofScreenshot(undefined)}
+                        className="absolute top-1 right-1 px-1.5 py-0.5 bg-rose-900/80 hover:bg-rose-800 text-white rounded text-[9px] font-mono transition cursor-pointer"
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <label className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-dashed border-slate-700 text-slate-300 rounded text-[10px] font-mono font-semibold transition cursor-pointer">
+                    <Upload size={11} className="text-cyan-400" />
+                    <span>{proofScreenshot ? "Replace Screenshot Proof" : "📸 Attach / Upload Sent DM Screenshot"}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setProofScreenshot(ev.target?.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
 
               <button

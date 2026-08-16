@@ -88,6 +88,15 @@ export interface Opportunity {
   gmailMessageId?: string;
   gmailSentTo?: string;
   gmailLastSynced?: string;
+
+  // Verified Outreach Proof & Screenshot Audit
+  outreachProof?: {
+    platform: string;
+    recipient: string;
+    messageText: string;
+    sentAt: string;
+    screenshotUrl?: string;
+  };
 }
 
 export interface Stats {
