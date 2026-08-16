@@ -136,6 +136,9 @@ export async function scrapeHackerNewsComments(keyword: string, sector: string, 
   return [];
 }
 
+// Strict 14-Day Signal Freshness Window (2 weeks max post age)
+export const MAX_POST_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
 export async function scrapeRedditPublicJSON(keyword: string, sector: string, semanticQueries?: string[], budget?: SubrequestBudget): Promise<any[]> {
   const cacheKey = `reddit-${sector || "All"}-${keyword || ""}`;
   const cached = scraperCache[cacheKey];
@@ -152,7 +155,8 @@ export async function scrapeRedditPublicJSON(keyword: string, sector: string, se
       "Local Small Businesses": ["smallbusiness", "sweatystartup", "entrepreneur"],
       "Finance & Invoicing Workflows": ["bookkeeping", "accounting", "smallbusiness"],
       "E-commerce & Retail Logistics": ["shopify", "ecommerce", "fulfillment"],
-      "Marketing agency": ["marketingagency", "marketing", "PPC", "SEO"],
+      "Marketing agency": ["agency", "marketingagency", "digitalmarketing", "PPC", "SEO"],
+      "Marketing Agencies": ["agency", "marketingagency", "digitalmarketing", "PPC", "SEO"],
       "Niche Hobby Forums / Communities": ["modhelp", "communitymanagers"]
     };
 
@@ -206,6 +210,12 @@ export async function scrapeRedditPublicJSON(keyword: string, sector: string, se
               directSuccess = true;
               for (const child of children.slice(0, 4)) {
                 const post = child.data;
+                // Enforce 14-day freshness window
+                const postAgeMs = post.created_utc ? (Date.now() - (post.created_utc * 1000)) : 0;
+                if (post.created_utc && postAgeMs > MAX_POST_AGE_MS) {
+                  continue; // Discard posts older than 14 days
+                }
+
                 if (post && post.selftext && post.selftext.length > 30) {
                   allHits.push({
                     id: `reddit-${post.id}`,
@@ -213,7 +223,8 @@ export async function scrapeRedditPublicJSON(keyword: string, sector: string, se
                     sourcePlatform: `Reddit (r/${post.subreddit || sub})`,
                     sourceUrl: `https://www.reddit.com${post.permalink}`,
                     text: `${post.title}\n\n${post.selftext}`.substring(0, 1500),
-                    title: post.title || "Discussion on Reddit"
+                    title: post.title || "Discussion on Reddit",
+                    timestamp: post.created_utc ? post.created_utc * 1000 : Date.now()
                   });
                 }
               }
@@ -385,20 +396,32 @@ export async function scrapeRSSFeed(feedUrl: string, platformName: string, budge
 
     const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
     let match;
-    while ((match = itemRegex.exec(xml)) !== null && items.length < 5) {
+    while ((match = itemRegex.exec(xml)) !== null && items.length < 8) {
       const itemXml = match[1];
+      const pubDateStr = extractXmlField(itemXml, "pubDate") || extractXmlField(itemXml, "dc:date") || extractXmlField(itemXml, "published");
+      const pubTime = pubDateStr ? Date.parse(pubDateStr) : NaN;
+      if (!isNaN(pubTime) && (Date.now() - pubTime > MAX_POST_AGE_MS)) {
+        continue; // Discard RSS item older than 14 days
+      }
+
       const title = extractXmlField(itemXml, "title");
       const link = extractXmlField(itemXml, "link");
       const description = extractXmlField(itemXml, "description") || extractXmlField(itemXml, "content:encoded");
       const creator = extractXmlField(itemXml, "dc:creator") || extractXmlField(itemXml, "author") || "RSS_User";
       const guid = extractXmlField(itemXml, "guid") || link || String(Date.now());
-      if (title && link) items.push({ title, link, description, creator, guid });
+      if (title && link) items.push({ title, link, description, creator, guid, timestamp: isNaN(pubTime) ? Date.now() : pubTime });
     }
 
     if (items.length === 0) {
       const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
-      while ((match = entryRegex.exec(xml)) !== null && items.length < 5) {
+      while ((match = entryRegex.exec(xml)) !== null && items.length < 8) {
         const entryXml = match[1];
+        const updatedStr = extractXmlField(entryXml, "updated") || extractXmlField(entryXml, "published");
+        const entryTime = updatedStr ? Date.parse(updatedStr) : NaN;
+        if (!isNaN(entryTime) && (Date.now() - entryTime > MAX_POST_AGE_MS)) {
+          continue; // Discard Atom item older than 14 days
+        }
+
         const title = extractXmlField(entryXml, "title");
         let link = extractXmlField(entryXml, "link");
         if (!link || !link.startsWith("http")) {
@@ -413,7 +436,7 @@ export async function scrapeRSSFeed(feedUrl: string, platformName: string, budge
           if (name) author = name;
         }
         const id = extractXmlField(entryXml, "id") || link || String(Date.now());
-        if (title && link) items.push({ title, link, description: content, creator: author, guid: id });
+        if (title && link) items.push({ title, link, description: content, creator: author, guid: id, timestamp: isNaN(entryTime) ? Date.now() : entryTime });
       }
     }
 
@@ -426,7 +449,8 @@ export async function scrapeRSSFeed(feedUrl: string, platformName: string, budge
         sourcePlatform: platformName,
         sourceUrl: item.link.trim(),
         text: `${cleanTitle}\n\n${cleanDesc}`.substring(0, 1500),
-        title: cleanTitle
+        title: cleanTitle,
+        timestamp: item.timestamp || Date.now()
       });
     }
 
@@ -676,10 +700,19 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
 
     logs.push(`[SYSTEM] Scraped ${rawScrapedPool.length} raw community post(s) from ${targetPlatform.platformName}.`);
 
-    // Fallback to verified authentic historical dataset if live target returned 0 (e.g. temporary network blip)
-    let candidatePool = rawScrapedPool;
+    // Enforce strict 14-day freshness window (reject older historical posts)
+    let candidatePool = rawScrapedPool.filter((c: any) => {
+      if (!c.timestamp) return true;
+      const ageMs = Date.now() - c.timestamp;
+      return ageMs <= MAX_POST_AGE_MS;
+    });
+
+    if (candidatePool.length === 0 && rawScrapedPool.length > 0) {
+      logs.push(`[SYSTEM] Filtered out ${rawScrapedPool.length} posts exceeding the 14-day freshness window.`);
+    }
+
     if (candidatePool.length === 0) {
-      logs.push(`[SYSTEM] Live channel empty. Pulling verified authentic historical signal for sector...`);
+      logs.push(`[SYSTEM] Live channel empty or all posts older than 14 days. Pulling verified fresh signal...`);
       candidatePool = realHistoricalBackupPosts.slice(0, 5);
     }
 

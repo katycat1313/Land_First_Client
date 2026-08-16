@@ -51,3 +51,9 @@ The goal is to create meaningful connections between problems and solutions.
 - **PRIORITIZE NIMBLE SOLO FOUNDERS & MICRO-BUSINESS OWNERS (1-10 employees)**: Target home service contractors (HVAC, plumbers, roofers, landscapers), real estate agents/investors, boutique marketing/recruiting agencies, local specialty shops, and independent consultants.
 - **WHY**: The owner IS the decision maker. They experience immediate friction (lost leads, missed calls, manual CSV spreadsheet cleanup) and can approve a $500–$1,500 Stripe deposit on the spot in 5 minutes without needing a board approval, corporate license, or case study history.
 
+## 6. Strict 14-Day Signal Freshness Window
+- **MAXIMUM 14-DAY POST AGE**: Never crawl, extract, or surface posts, complaints, or discussions that are older than 14 calendar days (2 weeks).
+- **RATIONALE**: Micro-business owners and marketing agencies who experienced operational bottlenecks more than 2 weeks ago have either already implemented a temporary fix, abandoned the initiative, or cooled down. Leads within 14 days have immediate, top-of-mind pain, active commercial intent, and the highest response rate for closing 50% upfront deposits.
+
+
+
