@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.js",
+    "deploy": "npm run build && wrangler deploy",
     "start": "node dist/server.js",
     "clean": "rm -rf dist",
     "test": "tsx --test tests/suite.test.ts",
