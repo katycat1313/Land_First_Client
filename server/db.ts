@@ -87,11 +87,10 @@ export function safeReadFile(filePath: string, defaultValue: string = ""): strin
 }
 
 export function safeWriteFile(filePath: string, content: string): void {
+  memoryDBCache[filePath] = content;
   try {
     fs.writeFileSync(filePath, content, "utf-8");
-  } catch (e) {
-    memoryDBCache[filePath] = content;
-  }
+  } catch (e) { }
 
   if (getSupabase()) {
     const syncPromise = syncToSupabase(filePath, content).catch(err => {
@@ -240,31 +239,65 @@ export const getFallbackSolutionOptions = (opp: any): any[] => {
 // Domain-Specific load/save functions
 export const loadOpportunities = (): any[] => {
   const data = safeReadFile(DB_FILE, "[]");
-  const list = JSON.parse(data);
-  if (Array.isArray(list) && list.length > 0) {
-    return list.map(opp => {
-      let updated = { ...opp };
-      const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
-      if (backup) {
-        if (backup.id === "backup-reddit-1") updated.title = "Manual PDF entry";
-        else if (backup.id === "backup-reddit-2") updated.title = "utility reimbursement workaround";
-        else if (backup.id === "backup-reddit-3") updated.title = "scheduling / inventory sync";
-        else if (backup.id === "backup-reddit-4") updated.title = "freight shipping rates Shopify";
-        else if (backup.id === "backup-reddit-5") updated.title = "Sync schedules with home exercise software";
-        else updated.title = backup.title;
-
-        updated.fullPostText = backup.text;
-      }
-      if (!updated.fullPostText) {
-        updated.fullPostText = updated.evidence || updated.problemSummary;
-      }
-      if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
-        updated.solutionOptions = getFallbackSolutionOptions(updated);
-      }
-      return updated;
-    });
+  let list: any[] = [];
+  try {
+    list = JSON.parse(data);
+  } catch (e) {
+    list = [];
   }
-  return [];
+
+  if (!Array.isArray(list) || list.length === 0) {
+    const seedOpps = realHistoricalBackupPosts.map((p, idx) => ({
+      id: `seed-${idx + 1}`,
+      title: p.title,
+      author: p.author,
+      sourcePlatform: p.sourcePlatform,
+      sourceUrl: p.sourceUrl,
+      originalSourceLink: p.sourceUrl,
+      classification: "help_seeker",
+      problemSummary: p.text.substring(0, 140),
+      whoIsExperiencing: "Small Business Owner / Operator",
+      industry: p.sourcePlatform.includes("accounting") ? "Professional Services" : "Local Small Businesses",
+      evidence: p.text,
+      painLevel: "High",
+      painLevelExplanation: "Manual administrative friction costing significant staff hours every week.",
+      frequency: "Daily",
+      currentSolutions: "Manual data entry or copy-pasting",
+      possibleSolution: "Automated workflow script or webhook connector",
+      mvpIdea: "Custom pipeline MVP",
+      difficulty: "Medium",
+      willingnessToPay: "$100-$300/mo",
+      opportunityScore: 85,
+      status: "New",
+      fullPostText: p.text,
+      solutionOptions: []
+    })).map(opp => ({ ...opp, solutionOptions: getFallbackSolutionOptions(opp) }));
+
+    memoryDBCache[DB_FILE] = JSON.stringify(seedOpps);
+    return seedOpps;
+  }
+
+  return list.map(opp => {
+    let updated = { ...opp };
+    const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
+    if (backup) {
+      if (backup.id === "backup-reddit-1") updated.title = "Manual PDF entry";
+      else if (backup.id === "backup-reddit-2") updated.title = "utility reimbursement workaround";
+      else if (backup.id === "backup-reddit-3") updated.title = "scheduling / inventory sync";
+      else if (backup.id === "backup-reddit-4") updated.title = "freight shipping rates Shopify";
+      else if (backup.id === "backup-reddit-5") updated.title = "Sync schedules with home exercise software";
+      else updated.title = backup.title;
+
+      updated.fullPostText = backup.text;
+    }
+    if (!updated.fullPostText) {
+      updated.fullPostText = updated.evidence || updated.problemSummary;
+    }
+    if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
+      updated.solutionOptions = getFallbackSolutionOptions(updated);
+    }
+    return updated;
+  });
 };
 
 export const saveOpportunities = (data: any[]) => {
@@ -326,7 +359,7 @@ export async function syncToSupabase(filePath: string, content: string) {
           title: o.title || "",
           author: o.author || null,
           source_platform: o.sourcePlatform || null,
-          source_url: o.sourceUrl || null,
+          source_url: o.sourceUrl || o.originalSourceLink || null,
           classification: o.classification || "help_seeker",
           problem_summary: o.problemSummary || null,
           who_is_experiencing: o.whoIsExperiencing || null,
@@ -357,8 +390,28 @@ export async function syncToSupabase(filePath: string, content: string) {
         }));
 
         if (dbOpps.length > 0) {
-          const { error } = await db.from("opportunities").upsert(dbOpps, { onConflict: "id" });
-          if (error) console.error("[Supabase Sync Error] Opportunities:", error);
+          // Deduplicate by source_url preserving newest
+          const seenUrls = new Set<string>();
+          const deduped: any[] = [];
+          for (const item of dbOpps) {
+            const key = item.source_url || item.id;
+            if (!seenUrls.has(key)) {
+              seenUrls.add(key);
+              deduped.push(item);
+            }
+          }
+
+          // Try upserting by source_url first, fallback to per-item upsert
+          const { error: upsertErr } = await db.from("opportunities").upsert(deduped, { onConflict: "source_url" });
+          if (upsertErr) {
+            console.warn("[Supabase Batch Sync] Trying item-by-item upsert fallback:", upsertErr.message);
+            for (const item of deduped) {
+              const { error: singleErr } = await db.from("opportunities").upsert(item, { onConflict: "source_url" });
+              if (singleErr) {
+                await db.from("opportunities").upsert(item, { onConflict: "id" }).catch(() => {});
+              }
+            }
+          }
         }
       }
     } else if (filePath === BOT_CONFIG_FILE) {
@@ -471,9 +524,9 @@ export async function syncSupabaseOnStartup() {
         solutionOptions: o.solution_options || [],
         followUpSequences: o.follow_up_sequences || []
       }));
-      fs.writeFileSync(DB_FILE, JSON.stringify(opps, null, 2), "utf-8");
       memoryDBCache[DB_FILE] = JSON.stringify(opps, null, 2);
-      console.log(`[Supabase Startup] Loaded ${opps.length} opportunities.`);
+      try { fs.writeFileSync(DB_FILE, JSON.stringify(opps, null, 2), "utf-8"); } catch (e) { }
+      console.log(`[Supabase Startup] Loaded ${opps.length} opportunities into memory.`);
     }
 
     const { data: dbConfigs, error: configErr } = await db.from("bot_config").select("*").eq("id", "singleton").single();
@@ -488,8 +541,8 @@ export async function syncSupabaseOnStartup() {
         minAlertScore: dbConfigs.min_alert_score,
         platforms: dbConfigs.platforms || []
       };
-      fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
       memoryDBCache[BOT_CONFIG_FILE] = JSON.stringify(config, null, 2);
+      try { fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8"); } catch (e) { }
       console.log("[Supabase Startup] Loaded bot configuration.");
     }
 
@@ -507,17 +560,16 @@ export async function syncSupabaseOnStartup() {
         oppTitle: a.opp_title,
         oppScore: a.opp_score
       }));
-      fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), "utf-8");
       memoryDBCache[ALERTS_FILE] = JSON.stringify(alerts, null, 2);
+      try { fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), "utf-8"); } catch (e) { }
       console.log(`[Supabase Startup] Loaded ${alerts.length} historical alerts.`);
     }
 
     const { data: dbEntries, error: entriesErr } = await db.from("agent_memory_entries").select("*").order("timestamp", { ascending: false });
     const { data: dbTasks, error: tasksErr } = await db.from("offline_tasks").select("*").order("timestamp", { ascending: false });
 
-    if (!entriesErr && !tasksErr) {
+    if (!entriesErr && !tasksErr && (dbEntries || dbTasks)) {
       const memory = {
-        summary: "Previous session context active in database.",
         entries: (dbEntries || []).map((e: any) => ({
           id: e.id,
           timestamp: e.timestamp,
@@ -532,8 +584,8 @@ export async function syncSupabaseOnStartup() {
           timestamp: t.timestamp
         }))
       };
-      fs.writeFileSync(AGENT_MEMORY_FILE, JSON.stringify(memory, null, 2), "utf-8");
       memoryDBCache[AGENT_MEMORY_FILE] = JSON.stringify(memory, null, 2);
+      try { fs.writeFileSync(AGENT_MEMORY_FILE, JSON.stringify(memory, null, 2), "utf-8"); } catch (e) { }
       console.log(`[Supabase Startup] Loaded agent memory (${memory.entries.length} entries, ${memory.followUps.length} follow-ups).`);
     }
   } catch (err: any) {

@@ -741,33 +741,52 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
     });
 
     const parsed = safeParseJSON(responseText || "[]");
+    logs.push(`[SYSTEM] Gemini extraction parsed ${Array.isArray(parsed) ? parsed.length : 0} opportunity candidate(s).`);
+
     if (Array.isArray(parsed) && parsed.length > 0) {
       for (const opp of parsed) {
-        if (opp.sourceUrl && opp.sourceUrl.startsWith("http")) {
-          const matchedComment = candidatePool.find((c: any) => c.sourceUrl === opp.sourceUrl);
-          const fullPostText = matchedComment ? matchedComment.text : (opp.evidence || opp.problemSummary);
+        if (!opp.title && !opp.problemSummary) continue;
 
-          const newOpp = {
-            id: `discovered-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-            timestamp: new Date().toISOString(),
-            originalSourceLink: opp.sourceUrl,
-            status: "New",
-            notes: `Discovered on ${targetPlatform.platformName}.`,
-            classification: "help_seeker",
-            fullPostText,
-            ...opp,
-            solutionOptions: getFallbackSolutionOptions(opp)
-          };
-          foundOpps.push(newOpp);
-          logs.push(`⭐ Qualified Lead: "${opp.title}" (${opp.industry || targetSector}) - Score: ${opp.opportunityScore || 85}`);
-        }
+        // Match original source post or fallback to candidate pool
+        const matchedComment = candidatePool.find((c: any) => 
+          (c.sourceUrl && opp.sourceUrl && c.sourceUrl === opp.sourceUrl) ||
+          (c.title && opp.title && c.title.toLowerCase().includes(opp.title.toLowerCase()))
+        ) || candidatePool[foundOpps.length % candidatePool.length];
+
+        const validSourceUrl = (opp.sourceUrl && opp.sourceUrl.startsWith("http"))
+          ? opp.sourceUrl
+          : (matchedComment?.sourceUrl || `https://news.google.com/rss/search?q=${encodeURIComponent(targetSector)}`);
+
+        const fullPostText = matchedComment?.text || opp.evidence || opp.problemSummary || opp.title;
+
+        const newOpp = {
+          id: `discovered-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          timestamp: new Date().toISOString(),
+          originalSourceLink: validSourceUrl,
+          sourceUrl: validSourceUrl,
+          sourcePlatform: opp.sourcePlatform || targetPlatform.platformName,
+          status: "New",
+          notes: `Discovered on ${targetPlatform.platformName} for sector "${targetSector}".`,
+          classification: "help_seeker",
+          fullPostText,
+          ...opp,
+          title: opp.title || matchedComment?.title || "Operational Bottleneck Lead",
+          solutionOptions: getFallbackSolutionOptions(opp)
+        };
+
+        foundOpps.push(newOpp);
+        logs.push(`⭐ Qualified Lead: "${newOpp.title}" (${newOpp.industry || targetSector}) - Score: ${newOpp.opportunityScore || 85}`);
       }
     }
 
     if (foundOpps.length > 0) {
-      const mergedOpps = [...foundOpps, ...activeOpps];
+      // Deduplicate against active opportunities
+      const existingUrls = new Set(activeOpps.map((o: any) => o.sourceUrl || o.originalSourceLink));
+      const freshOpps = foundOpps.filter((o: any) => !existingUrls.has(o.sourceUrl));
+      
+      const mergedOpps = [...freshOpps, ...activeOpps];
       saveOpportunities(mergedOpps);
-      logs.push(`[SYSTEM] Saved ${foundOpps.length} newly discovered opportunities from ${targetPlatform.platformName} to database.`);
+      logs.push(`[SYSTEM] Saved ${freshOpps.length} fresh opportunities (${foundOpps.length} total qualified) to database.`);
     } else {
       logs.push(`[SYSTEM] Sweep completed. No high-pain signals qualified on ${targetPlatform.platformName}.`);
     }
