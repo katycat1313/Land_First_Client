@@ -282,7 +282,7 @@ export default function PacOverlay({
     }
   };
 
-  const handleApprovePost = async (id: string) => {
+  const handleApprovePost = async (id: string, launchScheduler: boolean = true) => {
     setComputerLogs(prev => [...prev, `[CAMPAIGN] Approving social post: ${id}...`]);
     try {
       const res = await apiFetch("/api/social-campaigns/approve", {
@@ -294,10 +294,87 @@ export default function PacOverlay({
         const data = await res.json();
         setCampaignPosts(prev => prev.map(p => p.id === id ? data.post : p));
         setComputerLogs(prev => [...prev, `[CAMPAIGN] Post ${id} APPROVED and scheduled!`]);
+
+        const approvedPost = campaignPosts.find(p => p.id === id);
+        if (approvedPost && launchScheduler) {
+          // 1. Copy content to clipboard
+          try {
+            await navigator.clipboard.writeText(approvedPost.content);
+          } catch (e) {}
+
+          // 2. Open Platform Scheduler
+          let platformUrl = "";
+          const platformLower = (approvedPost.platform || "").toLowerCase();
+
+          if (platformLower.includes("facebook") || platformLower.includes("meta") || platformLower.includes("instagram")) {
+            platformUrl = "https://business.facebook.com/latest/composer";
+          } else if (platformLower.includes("linkedin")) {
+            platformUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(approvedPost.content)}`;
+          } else if (platformLower.includes("twitter") || platformLower.includes("x")) {
+            platformUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(approvedPost.content)}`;
+          } else if (platformLower.includes("reddit")) {
+            platformUrl = `https://www.reddit.com/r/smallbusiness/submit?title=${encodeURIComponent("Practical workflow automation blueprint")}&text=${encodeURIComponent(approvedPost.content)}`;
+          } else {
+            platformUrl = "https://publish.buffer.com/compose";
+          }
+
+          if (platformUrl) {
+            window.open(platformUrl, '_blank');
+          }
+
+          alert(`📋 Post for ${approvedPost.platform} approved and copied to clipboard!\n\nOpened ${approvedPost.platform} scheduler in a new tab. Paste (⌘+V / Ctrl+V) and choose your schedule date/time (${approvedPost.scheduledDate}).`);
+        }
       }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleExportIcsCalendar = () => {
+    if (!campaignPosts || campaignPosts.length === 0) {
+      alert("No campaign posts to export. Click 'Plan 7-Day Campaign' first!");
+      return;
+    }
+
+    let icsContent = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Opportunity Radar//Thought Leadership Campaign//EN",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH"
+    ];
+
+    campaignPosts.forEach((post, index) => {
+      const dateStr = post.scheduledDate ? post.scheduledDate.replace(/-/g, "") : new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const startDt = `${dateStr}T140000Z`;
+      const endDt = `${dateStr}T143000Z`;
+      const summary = `📢 Post to ${post.platform} [Thought Leadership]`;
+      const description = `${(post.content || "").replace(/\n/g, "\\n")}\\n\\nVisual Prompt: ${(post.imagePrompt || "").replace(/\n/g, "\\n")}`;
+
+      icsContent.push(
+        "BEGIN:VEVENT",
+        `UID:campaign-${post.id}-${Date.now()}-${index}@missedrevenue.org`,
+        `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`,
+        `DTSTART:${startDt}`,
+        `DTEND:${endDt}`,
+        `SUMMARY:${summary}`,
+        `DESCRIPTION:${description}`,
+        `STATUS:CONFIRMED`,
+        "END:VEVENT"
+      );
+    });
+
+    icsContent.push("END:VCALENDAR");
+
+    const blob = new Blob([icsContent.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `7-Day-Campaign-Schedule-${new Date().toISOString().slice(0, 10)}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    alert("📅 Downloaded 7-Day Campaign Calendar (.ics)! Open this file on your computer/phone to add all scheduled posts to Apple Calendar, Google Calendar, or Outlook with full text pre-loaded.");
   };
 
   const handleRejectPost = async (id: string) => {
@@ -3695,7 +3772,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
             {activeTab === "campaigns" && (
               <div className="flex flex-col h-[520px] bg-slate-950/40 rounded-xl border border-slate-900 overflow-hidden">
                 {/* Header Actions */}
-                <div className="p-3 bg-slate-900/60 border-b border-slate-900 flex items-center justify-between shrink-0">
+                <div className="p-3 bg-slate-900/60 border-b border-slate-900 flex items-center justify-between shrink-0 flex-wrap gap-2">
                   <div>
                     <h3 className="text-xs font-bold text-white font-mono flex items-center gap-1.5">
                       <span className="relative flex h-2 w-2">
@@ -3708,23 +3785,83 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                       Generate authentic, jargon-free thought leadership to drive inbound leads.
                     </p>
                   </div>
-                  <button
-                    onClick={handleGenerateCampaign}
-                    disabled={isLoadingCampaign}
-                    className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg cursor-pointer"
-                    type="button"
-                  >
-                    {isLoadingCampaign ? (
+                  
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {campaignPosts.length > 0 && (
                       <>
-                        <span className="h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        Drafting Week...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={11} /> Plan 7-Day Campaign
+                        <button
+                          onClick={handleExportIcsCalendar}
+                          className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer"
+                          type="button"
+                          title="Export schedule to Apple/Google/Outlook Calendar"
+                        >
+                          <Calendar size={11} className="text-cyan-400" /> Export (.ics)
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            campaignPosts.forEach(p => handleApprovePost(p.id, false));
+                            alert("🚀 All 7 campaign posts have been approved and saved to your schedule!");
+                          }}
+                          className="px-2.5 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800/40 text-emerald-400 rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer"
+                          type="button"
+                        >
+                          <Check size={11} /> Approve All
+                        </button>
                       </>
                     )}
-                  </button>
+
+                    <button
+                      onClick={handleGenerateCampaign}
+                      disabled={isLoadingCampaign}
+                      className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg cursor-pointer"
+                      type="button"
+                    >
+                      {isLoadingCampaign ? (
+                        <>
+                          <span className="h-2.5 w-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          Drafting Week...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={11} /> Plan 7-Day Campaign
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Free Scheduler Hub Banner */}
+                <div className="px-3 py-1.5 bg-slate-950 border-b border-slate-900/80 flex items-center justify-between text-[9px] font-mono text-slate-400 overflow-x-auto gap-2">
+                  <span className="shrink-0 text-slate-500 font-semibold">Free Schedulers:</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href="https://business.facebook.com/latest/composer"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline flex items-center gap-0.5"
+                    >
+                      Meta Business Suite (FB/IG) ↗
+                    </a>
+                    <span className="text-slate-700">•</span>
+                    <a
+                      href="https://www.linkedin.com/feed/?shareActive=true"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-400 hover:underline flex items-center gap-0.5"
+                    >
+                      LinkedIn Scheduler ↗
+                    </a>
+                    <span className="text-slate-700">•</span>
+                    <a
+                      href="https://publish.buffer.com/compose"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:underline flex items-center gap-0.5"
+                    >
+                      Buffer (Free) ↗
+                    </a>
+                  </div>
                 </div>
 
                 {/* Campaign Posts List */}
@@ -3857,16 +3994,55 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                             </button>
                           </div>
 
-                          {/* Approval Trigger */}
-                          {post.status !== "Approved" && (
+                          {/* Approval & Scheduler Triggers */}
+                          <div className="flex items-center gap-1.5 shrink-0">
                             <button
-                              onClick={() => handleApprovePost(post.id)}
-                              className="px-3.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1 cursor-pointer shrink-0"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(post.content);
+                                  alert(`📋 Copied post text for ${post.platform} to clipboard!`);
+                                } catch (e) {}
+                              }}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer"
                               type="button"
+                              title="Copy post content to clipboard"
                             >
-                              Approve Post
+                              <Copy size={10} /> Copy
                             </button>
-                          )}
+
+                            {post.status !== "Approved" ? (
+                              <button
+                                onClick={() => handleApprovePost(post.id, true)}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer shadow-sm"
+                                type="button"
+                              >
+                                <Calendar size={10} /> Approve & Launch Scheduler
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  // Open platform scheduler directly
+                                  const platformLower = (post.platform || "").toLowerCase();
+                                  let url = "https://publish.buffer.com/compose";
+                                  if (platformLower.includes("facebook") || platformLower.includes("meta") || platformLower.includes("instagram")) {
+                                    url = "https://business.facebook.com/latest/composer";
+                                  } else if (platformLower.includes("linkedin")) {
+                                    url = `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(post.content)}`;
+                                  } else if (platformLower.includes("twitter") || platformLower.includes("x")) {
+                                    url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(post.content)}`;
+                                  } else if (platformLower.includes("reddit")) {
+                                    url = `https://www.reddit.com/r/smallbusiness/submit?title=${encodeURIComponent("Practical workflow automation blueprint")}&text=${encodeURIComponent(post.content)}`;
+                                  }
+                                  navigator.clipboard.writeText(post.content);
+                                  window.open(url, '_blank');
+                                }}
+                                className="px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/60 border border-cyan-800/40 text-cyan-300 rounded text-[9.5px] font-bold font-mono transition flex items-center gap-1 cursor-pointer"
+                                type="button"
+                              >
+                                <Send size={10} /> Open Scheduler
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))
