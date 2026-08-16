@@ -1147,26 +1147,38 @@ export default function OpportunityCardDetail({
                     <div className="grid grid-cols-1 gap-2 pt-1">
                       {opportunity.sourcePlatform.includes("Reddit") && (
                         <button
-                          onClick={() => {
-                            window.open(`https://www.reddit.com/message/compose/?to=${opportunity.author}&subject=Regarding your workflow bottleneck&message=${encodeURIComponent(draft)}`, '_blank');
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(draft);
+                            } catch (e) {}
+                            const cleanAuthor = (opportunity.author || "").replace(/^u\//, "");
+                            const pmUrl = cleanAuthor && cleanAuthor !== "[deleted]"
+                              ? `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your workflow bottleneck")}&message=${encodeURIComponent(draft)}`
+                              : (opportunity.sourceUrl || "https://reddit.com");
+                            window.open(pmUrl, '_blank');
+                            handleMarkSentAndLog();
                           }}
-                          className="w-full py-1.5 px-3 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          className="w-full py-1.5 px-3 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs rounded flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm"
                         >
                           <Send size={12} />
-                          <span>Launch PM on Reddit</span>
+                          <span>Launch Direct PM on Reddit & Log</span>
                         </button>
                       )}
 
                       {opportunity.sourcePlatform.includes("Hacker News") && (
                         <div className="space-y-1.5">
                           <button
-                            onClick={() => {
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(draft);
+                              } catch (e) {}
                               window.open(opportunity.sourceUrl, '_blank');
+                              handleMarkSentAndLog();
                             }}
                             className="w-full py-1.5 px-3 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded flex items-center justify-center gap-1.5 transition cursor-pointer"
                           >
                             <ExternalLink size={12} />
-                            <span>Reply Directly on HN Thread</span>
+                            <span>Copy Draft & Reply on HN Thread</span>
                           </button>
                           <p className="text-[9px] text-slate-500 text-center leading-normal italic">
                             Hacker News replies are public. DMs are not supported.
@@ -1176,13 +1188,17 @@ export default function OpportunityCardDetail({
 
                       {!opportunity.sourcePlatform.includes("Reddit") && !opportunity.sourcePlatform.includes("Hacker News") && (
                         <button
-                          onClick={() => {
-                            window.open(`mailto:${opportunity.author}@example.com?subject=Regarding your workflow challenge&body=${encodeURIComponent(draft)}`, '_blank');
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(draft);
+                            } catch (e) {}
+                            window.open(opportunity.sourceUrl || `mailto:${opportunity.author}@example.com?subject=Regarding your workflow challenge&body=${encodeURIComponent(draft)}`, '_blank');
+                            handleMarkSentAndLog();
                           }}
                           className="w-full py-1.5 px-3 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded flex items-center justify-center gap-1.5 transition cursor-pointer"
                         >
                           <Mail size={12} />
-                          <span>Contact Author via Local Email</span>
+                          <span>Copy Draft & Open Source Link</span>
                         </button>
                       )}
 

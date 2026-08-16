@@ -3,7 +3,7 @@ import {
   Mic, MicOff, Volume2, VolumeX, Monitor, Send, Sparkles, Cpu,
   Terminal, Play, Square, Check, AlertCircle, X, ChevronRight,
   User, Bot, HelpCircle, CornerDownLeft, RefreshCw, Layers, Plus, Zap,
-  Trash2, Save, Calendar, Activity, Settings, Sliders
+  Trash2, Save, Calendar, Activity, Settings, Sliders, Copy
 } from "lucide-react";
 import { sendGmailEmail } from "../utils/gmailApi";
 import { Opportunity } from "../types";
@@ -50,6 +50,10 @@ export default function PacOverlay({
     title: string;
     content: string;
     recipient?: string;
+    targetUrl?: string;
+    targetAuthor?: string;
+    targetPlatform?: string;
+    opportunityId?: string;
   } | null>(null);
   const [isSendingReviewEmail, setIsSendingReviewEmail] = useState(false);
   const [reviewEmailRecipient, setReviewEmailRecipient] = useState("");
@@ -665,6 +669,18 @@ export default function PacOverlay({
     const emailRegex = /\[(?:EMAIL|OUTREACH|DRAFT)\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i;
     const strategyRegex = /\[(?:STRATEGY|PLAN|ROADMAP)\]\s*([\s\S]+?)(?:\[\/|\n\n|$)/i;
 
+    // Match referenced opportunity in the text if any
+    const referencedOpp = (opportunities || []).find(o => 
+      (o.id && text.includes(o.id)) ||
+      (o.author && text.toLowerCase().includes(o.author.toLowerCase())) ||
+      (o.title && text.toLowerCase().includes(o.title.toLowerCase().substring(0, 20)))
+    ) || (opportunities && opportunities.length > 0 ? opportunities[0] : null);
+
+    const docTargetUrl = referencedOpp?.sourceUrl || referencedOpp?.originalSourceLink;
+    const docTargetAuthor = referencedOpp?.author;
+    const docTargetPlatform = referencedOpp?.sourcePlatform;
+    const docOppId = referencedOpp?.id;
+
     if (codeBlockMatch) {
       const rawType = codeBlockMatch[1].toLowerCase();
       const content = codeBlockMatch[2].trim();
@@ -676,7 +692,11 @@ export default function PacOverlay({
       setActiveDocument({
         type: docType,
         title: title,
-        content: content
+        content: content,
+        targetUrl: docTargetUrl,
+        targetAuthor: docTargetAuthor,
+        targetPlatform: docTargetPlatform,
+        opportunityId: docOppId
       });
       setActiveTab("review");
       setIsMinimized(false);
@@ -690,7 +710,11 @@ export default function PacOverlay({
         setActiveDocument({
           type: "proposal",
           title: "Business Proposal Draft",
-          content: propMatch[1].trim()
+          content: propMatch[1].trim(),
+          targetUrl: docTargetUrl,
+          targetAuthor: docTargetAuthor,
+          targetPlatform: docTargetPlatform,
+          opportunityId: docOppId
         });
         setActiveTab("review");
         setIsMinimized(false);
@@ -699,7 +723,11 @@ export default function PacOverlay({
         setActiveDocument({
           type: "outreach",
           title: "Email Outreach Template",
-          content: mailMatch[1].trim()
+          content: mailMatch[1].trim(),
+          targetUrl: docTargetUrl,
+          targetAuthor: docTargetAuthor,
+          targetPlatform: docTargetPlatform,
+          opportunityId: docOppId
         });
         setActiveTab("review");
         setIsMinimized(false);
@@ -708,7 +736,11 @@ export default function PacOverlay({
         setActiveDocument({
           type: "contract",
           title: "Strategic Execution Plan",
-          content: stratMatch[1].trim()
+          content: stratMatch[1].trim(),
+          targetUrl: docTargetUrl,
+          targetAuthor: docTargetAuthor,
+          targetPlatform: docTargetPlatform,
+          opportunityId: docOppId
         });
         setActiveTab("review");
         setIsMinimized(false);
@@ -1357,6 +1389,11 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
 [TARGET VERTICAL STRATEGY FOR CLIENT #1 & #2]
 - REJECT HEAVY CORPORATE & REGULATED HEALTHCARE: Healthcare networks, hospitals, and large corporate divisions have multi-month procurement cycles, HIPAA compliance sign-offs, vendor board reviews, corporate insurance mandates, and strict licensing requirements. Do NOT target these for Client #1 or #2!
 - COMMERCIAL SOLVENCY & BUDGET QUALIFICATION: Target established micro-businesses generating active revenue (HVAC/plumbing contractors, active real estate brokers, boutique marketing/recruiting agencies with 1-10 employees). They have real cash flow, feel severe operational pain, and can easily approve a $500–$1,500 50% deposit on the spot.
+
+[OUTREACH & MESSAGING DELIVERY TRUTH]
+- Reddit, LinkedIn, Twitter, and forum DMs are dispatched safely via browser deep-linking, NOT by invisible background bots pretending to be the user.
+- When you draft outreach, tell your partner: "I've drafted the message and loaded it into your Review tab. When you click Log, Approve & Launch, it copies the message to your clipboard, marks them Contacted in your CRM, and opens Reddit directly in your browser so you can review and hit send."
+- NEVER claim that background bots secretly sent private DMs from the user's personal account.
 
 [UI ACTION TAGS & APPLICATION CONTROL]
 Whenever you want to pull up a card on screen, run crawlers, or navigate the UI, invoke the corresponding tool function or include the action tag:
@@ -3395,64 +3432,112 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                 </div>
 
                 {activeDocument && (
-                  <div className="pt-3 border-t border-slate-900 flex gap-2 flex-wrap">
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(activeDocument.content);
-                        alert("Copied document content to clipboard!");
-                      }}
-                      className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
-                      type="button"
-                    >
-                      Copy Draft
-                    </button>
-                    {activeDocument.type === "outreach" && gmailToken && (
+                  <div className="pt-3 border-t border-slate-900 space-y-2">
+                    <div className="flex gap-2 flex-wrap">
                       <button
                         onClick={async () => {
-                          if (!reviewEmailRecipient || !reviewEmailRecipient.includes("@")) {
-                            alert("Please enter a valid recipient email address first.");
-                            return;
-                          }
-                          const confirmed = window.confirm(`Send this outreach email to ${reviewEmailRecipient} via Gmail?`);
-                          if (!confirmed) return;
-                          setIsSendingReviewEmail(true);
                           try {
-                            const matchSubject = activeDocument.content.match(/subject:\s*(.*)/i);
-                            const subject = matchSubject ? matchSubject[1].trim() : `Regarding your project proposal`;
-                            const body = activeDocument.content.replace(/subject:\s*(.*)/i, "").trim();
-
-                            await sendGmailEmail(gmailToken, reviewEmailRecipient, subject, body);
-                            alert("Email sent successfully!");
-                            setActiveDocument(null);
-                            setActiveTab("chat");
-                            if (onRefreshOpportunities) {
-                              onRefreshOpportunities();
-                            }
-                          } catch (err: any) {
-                            console.error(err);
-                            alert("Failed to send email: " + err.message);
-                          } finally {
-                            setIsSendingReviewEmail(false);
+                            await navigator.clipboard.writeText(activeDocument.content);
+                            alert("📋 Copied draft message to clipboard!");
+                          } catch (e) {
+                            alert("Copied to clipboard!");
                           }
                         }}
-                        disabled={isSendingReviewEmail}
-                        className="flex-1 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-800 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                        className="py-1.5 px-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
                         type="button"
                       >
-                        {isSendingReviewEmail ? <RefreshCw size={11} className="animate-spin" /> : null}
-                        Send via Gmail
+                        <Copy size={11} /> Copy Draft
                       </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        setActiveDocument(null);
-                        setActiveTab("chat");
-                      }}
-                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
-                      type="button"
-                    >
-                      Approve & Log
-                    </button>
+
+                      {activeDocument.type === "outreach" && gmailToken && (
+                        <button
+                          onClick={async () => {
+                            if (!reviewEmailRecipient || !reviewEmailRecipient.includes("@")) {
+                              alert("Please enter a valid recipient email address first.");
+                              return;
+                            }
+                            const confirmed = window.confirm(`Send this outreach email to ${reviewEmailRecipient} via Gmail?`);
+                            if (!confirmed) return;
+                            setIsSendingReviewEmail(true);
+                            try {
+                              const matchSubject = activeDocument.content.match(/subject:\s*(.*)/i);
+                              const subject = matchSubject ? matchSubject[1].trim() : `Regarding your project proposal`;
+                              const body = activeDocument.content.replace(/subject:\s*(.*)/i, "").trim();
+
+                              await sendGmailEmail(gmailToken, reviewEmailRecipient, subject, body);
+                              alert("Email sent successfully!");
+                              setActiveDocument(null);
+                              setActiveTab("chat");
+                              if (onRefreshOpportunities) {
+                                onRefreshOpportunities();
+                              }
+                            } catch (err: any) {
+                              console.error(err);
+                              alert("Failed to send email: " + err.message);
+                            } finally {
+                              setIsSendingReviewEmail(false);
+                            }
+                          }}
+                          disabled={isSendingReviewEmail}
+                          className="py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 disabled:bg-cyan-800 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5"
+                          type="button"
+                        >
+                          {isSendingReviewEmail ? <RefreshCw size={11} className="animate-spin" /> : null}
+                          Send via Gmail
+                        </button>
+                      )}
+
+                      <button
+                        onClick={async () => {
+                          // 1. Copy draft to clipboard
+                          try {
+                            await navigator.clipboard.writeText(activeDocument.content);
+                          } catch (e) {}
+
+                          // 2. Open destination URL / Reddit message composer in a new tab
+                          let destinationOpened = false;
+                          const isReddit = activeDocument.targetPlatform?.includes("Reddit") || activeDocument.title?.toLowerCase().includes("reddit") || (activeDocument.targetUrl && activeDocument.targetUrl.includes("reddit.com"));
+
+                          if (isReddit && activeDocument.targetAuthor && activeDocument.targetAuthor !== "[deleted]") {
+                            const cleanAuthor = activeDocument.targetAuthor.replace(/^u\//, "");
+                            const pmUrl = `https://www.reddit.com/message/compose/?to=${encodeURIComponent(cleanAuthor)}&subject=${encodeURIComponent("Regarding your post: " + (activeDocument.title || "workflow bottleneck"))}&message=${encodeURIComponent(activeDocument.content)}`;
+                            window.open(pmUrl, '_blank');
+                            destinationOpened = true;
+                          } else if (activeDocument.targetUrl && activeDocument.targetUrl.startsWith("http")) {
+                            window.open(activeDocument.targetUrl, '_blank');
+                            destinationOpened = true;
+                          }
+
+                          // 3. Mark opportunity as Contacted in CRM
+                          if (activeDocument.opportunityId) {
+                            try {
+                              await apiFetch(`/api/opportunities/${activeDocument.opportunityId}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ status: "Contacted", notes: `Outreach approved on ${new Date().toLocaleDateString()}` })
+                              });
+                              if (onRefreshOpportunities) onRefreshOpportunities();
+                            } catch (e) {}
+                          }
+
+                          // 4. Log in console
+                          setComputerLogs(prev => [
+                            ...prev,
+                            `[CRM] Approved outreach draft! Copied to clipboard and ${destinationOpened ? "opened live platform in your browser." : "ready to paste."}`
+                          ]);
+
+                          alert(`📋 Outreach draft copied to clipboard!\n\n${destinationOpened ? "Opened Reddit/platform in a new browser tab for you to review and hit Send." : "Paste directly into your message window to send."}`);
+
+                          setActiveDocument(null);
+                          setActiveTab("chat");
+                        }}
+                        className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10.5px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/40"
+                        type="button"
+                      >
+                        <Send size={11} />
+                        <span>Log, Approve & Launch</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
