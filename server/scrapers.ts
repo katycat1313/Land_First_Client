@@ -722,8 +722,10 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
     }
 
     if (candidatePool.length === 0) {
-      logs.push(`[SYSTEM] Live channel empty or all posts older than 14 days. Pulling verified fresh signal...`);
-      candidatePool = realHistoricalBackupPosts.slice(0, 5);
+      logs.push(`[SYSTEM] Channel empty or all posts older than 14 days. Pulling verified fresh live signals from live news index...`);
+      const fallbackUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(targetSector + " workflow manual problem bottleneck")}&hl=en-US&gl=US&ceid=US:en`;
+      const freshRss = await scrapeRSSFeed(fallbackUrl, "Google News RSS", subrequestBudget);
+      candidatePool = freshRss.filter(c => !c.timestamp || (Date.now() - c.timestamp <= MAX_POST_AGE_MS));
     }
 
     // Pre-score buyer intent to prioritize high-pain leads

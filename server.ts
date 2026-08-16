@@ -602,37 +602,19 @@ const loadOpportunities = (): any[] => {
   }
 
   if (!Array.isArray(list) || list.length === 0) {
-    const seedOpps = realHistoricalBackupPosts.map((p, idx) => ({
-      id: `seed-${idx + 1}`,
-      title: p.title,
-      author: p.author,
-      sourcePlatform: p.sourcePlatform,
-      sourceUrl: p.sourceUrl,
-      originalSourceLink: p.sourceUrl,
-      classification: "help_seeker",
-      problemSummary: p.text.substring(0, 140),
-      whoIsExperiencing: "Small Business Owner / Operator",
-      industry: p.sourcePlatform.includes("accounting") ? "Professional Services" : "Local Small Businesses",
-      evidence: p.text,
-      painLevel: "High",
-      painLevelExplanation: "Manual administrative friction costing significant staff hours every week.",
-      frequency: "Daily",
-      currentSolutions: "Manual data entry or copy-pasting",
-      possibleSolution: "Automated workflow script or webhook connector",
-      mvpIdea: "Custom pipeline MVP",
-      difficulty: "Medium",
-      willingnessToPay: "$100-$300/mo",
-      opportunityScore: 85,
-      status: "New",
-      fullPostText: p.text,
-      solutionOptions: []
-    })).map(opp => ({ ...opp, solutionOptions: getFallbackSolutionOptions(opp) }));
-
-    memoryDBCache[DB_FILE] = JSON.stringify(seedOpps);
-    return seedOpps;
+    return [];
   }
 
-  return list.map(opp => {
+  // Filter out any legacy seed or simulated posts
+  const fakeAuthors = new Set(["salon_owner_9", "taxpro_jenn", "boston_builder", "cargo_cultist", "clinic_op_manager"]);
+  const authenticList = list.filter(opp => {
+    if (!opp) return false;
+    if (typeof opp.id === "string" && (opp.id.startsWith("seed-") || opp.id.startsWith("backup-"))) return false;
+    if (fakeAuthors.has(opp.author)) return false;
+    return true;
+  });
+
+  return authenticList.map(opp => {
     let updated = { ...opp };
     const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
     if (backup) {
@@ -1701,15 +1683,11 @@ app.post("/api/opportunities/discover", async (req, res) => {
         "Marketing agency": ["marketing agency", "campaign", "client reporting", "client approval", "scope creep"],
         "Niche Hobby Forums / Communities": ["forum", "moderator", "community", "admin"]
       };
-      const keywords = sectorKeywordsMap[targetSector] || [];
-      logTrace(`Filtering historical fallback posts for keywords matching "${targetSector}": [${keywords.join(", ")}]`);
-      const filteredBackups = realHistoricalBackupPosts.filter(post => {
-        if (targetSector === "All") return true;
-        const textLower = `${post.text} ${post.title}`.toLowerCase();
-        return keywords.some(kw => textLower.includes(kw));
-      });
-      scrapedComments = filteredBackups.length > 0 ? filteredBackups : realHistoricalBackupPosts;
-      logTrace(`Sector filter completed. Loaded ${scrapedComments.length} raw historical items.`);
+      logTrace(`No comments found in primary scrape. Pulling fresh live signals from RSS index...`);
+      const fallbackUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(targetSector + " workflow manual problem bottleneck")}&hl=en-US&gl=US&ceid=US:en`;
+      const freshRss = await scrapeRSSFeed(fallbackUrl, "Google News RSS");
+      scrapedComments = freshRss.filter(c => !c.timestamp || (Date.now() - c.timestamp <= 14 * 86400000));
+      logTrace(`Loaded ${scrapedComments.length} fresh live RSS items for sector.`);
     }
 
     logTrace(`Preparing final evaluation feed of ${scrapedComments.length} items for AI analysis...`);

@@ -115,49 +115,8 @@ export function saveToMemoryAndBackup(filePath: string, content: string): void {
   safeWriteFile(filePath, content);
 }
 
-// Real backup items for organic restoration
-export const realHistoricalBackupPosts = [
-  {
-    id: "backup-reddit-1",
-    author: "taxpro_jenn",
-    sourcePlatform: "Reddit (r/accounting)",
-    sourceUrl: "https://www.reddit.com/r/accounting/comments/18x9y7a/manual_pdf_entry/",
-    text: "We are still manually typing numbers from client PDFs into our bookkeeping system. It is 2026 and we still do not have a reliable OCR that handles multi-page tax forms without scrambling columns. We spend about 15 hours a week just doing manual data entry of tabular invoices.",
-    title: "Manual invoice PDF data entry into bookkeeping software"
-  },
-  {
-    id: "backup-reddit-2",
-    author: "boston_builder",
-    sourcePlatform: "Reddit (r/PropertyManagement)",
-    sourceUrl: "https://www.reddit.com/r/PropertyManagement/comments/17z8x9y/utility_reimbursement_workaround/",
-    text: "Our landlord managers have to manually copy utility bills from the city website and upload them to our resident portal for reimbursement. It is about 4 hours of tedious work every month for each property. A script to auto-fetch the water and power bills and post them to the tenant portal would save us thousands in staff labor.",
-    title: "Tedious manual utility billing copy-paste for rental properties"
-  },
-  {
-    id: "backup-reddit-3",
-    author: "salon_owner_9",
-    sourcePlatform: "Reddit (r/smallbusiness)",
-    sourceUrl: "https://www.reddit.com/r/smallbusiness/comments/16y7w8a/scheduling_inventory_sync/",
-    text: "Is there an app that can sync our salon scheduling with our retail product inventory? Right now when someone books a hair coloring appointment, we have to manually check if we have enough dye in the back room and update our Shopify stock. If we are short, we have to manually email the client to reschedule.",
-    title: "Lack of synchronization between booking schedule and salon inventory"
-  },
-  {
-    id: "backup-reddit-4",
-    author: "cargo_cultist",
-    sourcePlatform: "Reddit (r/ecommerce)",
-    sourceUrl: "https://www.reddit.com/r/ecommerce/comments/15u8q8b/freight_shipping_rates_shopify/",
-    text: "Syncing Shopify shipping rates with custom freight dimensions is a nightmare. For oversized packages, we have to copy the shipping address, run it through the FedEx LTL calculator, and manually email the client a shipping adjustment invoice. We lose several customers due to delay in calculating shipping rates.",
-    title: "Friction in calculating freight shipping adjustments on Shopify"
-  },
-  {
-    id: "backup-reddit-5",
-    author: "clinic_op_manager",
-    sourcePlatform: "Reddit (r/medicaloffice)",
-    sourceUrl: "https://www.reddit.com/r/medicaloffice/comments/18m2k1x/ehr_home_exercise_sync/",
-    text: "Our physical therapy clinic struggles to sync our patient schedules from our EHR system with our home exercise software. We have to manually export client lists to CSV every morning, clean up duplicate phone numbers, and import them into the therapy platform so patients can get their workout plans.",
-    title: "Manual EHR patient list sync with therapy platform"
-  }
-];
+// Real backup items for organic restoration (Strictly authentic empty array)
+export const realHistoricalBackupPosts: any[] = [];
 
 export const getFallbackSolutionOptions = (opp: any): any[] => {
   const isHighPain = opp.painLevel === "High";
@@ -247,37 +206,19 @@ export const loadOpportunities = (): any[] => {
   }
 
   if (!Array.isArray(list) || list.length === 0) {
-    const seedOpps = realHistoricalBackupPosts.map((p, idx) => ({
-      id: `seed-${idx + 1}`,
-      title: p.title,
-      author: p.author,
-      sourcePlatform: p.sourcePlatform,
-      sourceUrl: p.sourceUrl,
-      originalSourceLink: p.sourceUrl,
-      classification: "help_seeker",
-      problemSummary: p.text.substring(0, 140),
-      whoIsExperiencing: "Small Business Owner / Operator",
-      industry: p.sourcePlatform.includes("accounting") ? "Professional Services" : "Local Small Businesses",
-      evidence: p.text,
-      painLevel: "High",
-      painLevelExplanation: "Manual administrative friction costing significant staff hours every week.",
-      frequency: "Daily",
-      currentSolutions: "Manual data entry or copy-pasting",
-      possibleSolution: "Automated workflow script or webhook connector",
-      mvpIdea: "Custom pipeline MVP",
-      difficulty: "Medium",
-      willingnessToPay: "$100-$300/mo",
-      opportunityScore: 85,
-      status: "New",
-      fullPostText: p.text,
-      solutionOptions: []
-    })).map(opp => ({ ...opp, solutionOptions: getFallbackSolutionOptions(opp) }));
-
-    memoryDBCache[DB_FILE] = JSON.stringify(seedOpps);
-    return seedOpps;
+    return [];
   }
 
-  return list.map(opp => {
+  // Filter out any legacy seed or simulated posts
+  const fakeAuthors = new Set(["salon_owner_9", "taxpro_jenn", "boston_builder", "cargo_cultist", "clinic_op_manager"]);
+  const authenticList = list.filter(opp => {
+    if (!opp) return false;
+    if (typeof opp.id === "string" && (opp.id.startsWith("seed-") || opp.id.startsWith("backup-"))) return false;
+    if (fakeAuthors.has(opp.author)) return false;
+    return true;
+  });
+
+  return authenticList.map(opp => {
     let updated = { ...opp };
     const backup = realHistoricalBackupPosts.find(b => b.sourceUrl === updated.sourceUrl || b.sourceUrl === updated.originalSourceLink);
     if (backup) {
