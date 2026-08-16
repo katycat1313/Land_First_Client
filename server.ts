@@ -3105,26 +3105,52 @@ app.post("/api/stripe/create-payment-link", async (req, res) => {
     const stripe = getStripeClient();
 
     if (stripe) {
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: currency.toLowerCase(),
-              product_data: {
-                name: title || "50% Upfront Development Deposit",
-                description: description || `50% deposit for custom software development - Client: ${clientName || 'Valued Client'}`,
+      const baseUrl = process.env.APP_URL && process.env.APP_URL !== "MY_APP_URL" ? process.env.APP_URL : "https://missedrevenue.org";
+      let session: Stripe.Checkout.Session;
+      try {
+        session = await stripe.checkout.sessions.create({
+          line_items: [
+            {
+              price_data: {
+                currency: currency.toLowerCase(),
+                product_data: {
+                  name: title || "50% Upfront Development Deposit",
+                  description: description || `50% deposit for custom software development - Client: ${clientName || 'Valued Client'}`,
+                  tax_code: "txcd_20030000"
+                },
+                unit_amount: Math.round(numericAmount * 100), // in cents
               },
-              unit_amount: Math.round(numericAmount * 100), // in cents
+              quantity: 1,
             },
-            quantity: 1,
-          },
-        ],
-        mode: "payment",
-        customer_email: clientEmail || undefined,
-        success_url: `${process.env.APP_URL || "https://problems-solutions.ai.studio"}?payment=success`,
-        cancel_url: `${process.env.APP_URL || "https://problems-solutions.ai.studio"}?payment=cancel`,
-      });
+          ],
+          mode: "payment",
+          customer_email: clientEmail || undefined,
+          success_url: `${baseUrl}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}?payment=cancel`,
+        });
+      } catch (err: any) {
+        session = await stripe.checkout.sessions.create({
+          line_items: [
+            {
+              price_data: {
+                currency: currency.toLowerCase(),
+                product_data: {
+                  name: title || "50% Upfront Development Deposit",
+                  description: description || `50% deposit for custom software development - Client: ${clientName || 'Valued Client'}`,
+                },
+                unit_amount: Math.round(numericAmount * 100),
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          customer_email: clientEmail || undefined,
+          // @ts-ignore
+          managed_payments: { enabled: false },
+          success_url: `${baseUrl}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}?payment=cancel`,
+        });
+      }
 
       return res.json({
         success: true,
