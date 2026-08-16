@@ -2737,7 +2737,7 @@ registerProcessor('pcm-processor', PCMProcessor);
     const steps = [
       "Initiating autonomous outreach campaign...",
       "Scanning Interactive Opportunity board for high-pain leads...",
-      "Evaluating leads against target criteria (Healthcare, Real Estate, SMBs)...",
+      "Evaluating leads against target criteria (Marketing Agencies, Trade Contractors, Real Estate, SMBs)...",
       "Analyzing active screen workspace layout to target high-priority prospects...",
       "Drafting a bespoke, highly personal outreach proposal (Enforcing non-negotiable 50% upfront payment rule)...",
       "Constructing direct non-jargon solution pitch via Google Gmail integration..."

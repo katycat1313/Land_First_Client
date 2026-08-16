@@ -1541,14 +1541,13 @@ app.post("/api/opportunities/discover", async (req, res) => {
           const quoraPlat = config.platforms.find((p: any) => p.platformId === "quora");
           if (quoraPlat) {
             const sectorQuoraTopics: Record<string, string[]> = {
-              "Healthcare Operations": ["Healthcare", "Hospital-Administration", "Medicine-and-Healthcare"],
+              "Marketing agency": ["Marketing-Agencies", "Digital-Marketing", "Advertising"],
               "Real Estate & Property Management": ["Real-Estate", "Property-Management", "Landlords"],
               "Construction & Subcontracting": ["Construction-Industry", "Contractors", "Home-Improvement"],
               "Professional Services (Accounting/CPA/Law)": ["Accounting", "Bookkeeping", "Lawyers"],
               "Local Small Businesses": ["Small-Businesses", "Local-Businesses", "Entrepreneurship"],
               "Finance & Invoicing Workflows": ["Invoicing", "Billing", "Bookkeeping"],
               "E-commerce & Retail Logistics": ["E-Commerce", "Shopify", "Drop-Shipping"],
-              "Marketing agency": ["Marketing-Agencies", "Digital-Marketing", "Advertising"],
               "Niche Hobby Forums / Communities": ["Online-Communities", "Forum-Software"]
             };
             const topics = (sectorQuoraTopics[targetSector] || ["Small-Businesses", "Operations-Management", "Business-Automation"]).slice(0, 2);
@@ -1673,14 +1672,13 @@ app.post("/api/opportunities/discover", async (req, res) => {
       logTrace("Live crawler feeds returned 0 posts. Utilizing pre-verified, authentic historical backup posts to prevent empty screens...");
       // Filter backup posts by matching sector keywords in text/title
       const sectorKeywordsMap: Record<string, string[]> = {
-        "Healthcare Operations": ["clinic", "EHR", "medical", "patient", "therapy"],
+        "Marketing agency": ["marketing agency", "campaign", "client reporting", "client approval", "scope creep"],
         "Real Estate & Property Management": ["landlord", "tenant", "real estate", "property", "zoning"],
         "Construction & Subcontracting": ["contractor", "construction", "blueprint", "estimating", "electricians"],
         "Professional Services (Accounting/CPA/Law)": ["accounting", "bookkeeping", "CPA", "lawyer", "invoice", "tax"],
         "Local Small Businesses": ["small business", "scheduling", "inventory", "salon"],
         "Finance & Invoicing Workflows": ["invoice", "payroll", "billing", "reconciliation"],
         "E-commerce & Retail Logistics": ["shopify", "shipping", "ecommerce", "freight", "fulfillment"],
-        "Marketing agency": ["marketing agency", "campaign", "client reporting", "client approval", "scope creep"],
         "Niche Hobby Forums / Communities": ["forum", "moderator", "community", "admin"]
       };
       logTrace(`No comments found in primary scrape. Pulling fresh live signals from RSS index...`);

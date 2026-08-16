@@ -47,7 +47,7 @@ export default function App() {
   const [selectedPlatform, setSelectedPlatform] = useState("All");
 
   // Continuous Discovery form states
-  const [discoverySector, setDiscoverySector] = useState("Healthcare Operations");
+  const [discoverySector, setDiscoverySector] = useState("Marketing agency");
   const [discoveryKeyword, setDiscoveryKeyword] = useState("");
   const [discoveryMode, setDiscoveryMode] = useState<"semantic" | "literal">("semantic");
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -1199,7 +1199,8 @@ export default function App() {
                   onChange={(e) => setDiscoverySector(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 cursor-pointer"
                 >
-                  <option value="Healthcare Operations" className="bg-slate-950 text-slate-200">Healthcare Operations</option>
+                  <option value="Marketing agency" className="bg-slate-950 text-slate-200">Marketing Agencies & Operations</option>
+                  <option value="Local Small Businesses" className="bg-slate-950 text-slate-200">Local Small Businesses (HVAC/Plumbing)</option>
                   <option value="Real Estate & Property Management" className="bg-slate-950 text-slate-200">Real Estate & Property Management</option>
                   <option value="Construction & Subcontracting" className="bg-slate-950 text-slate-200">Construction & Subcontracting</option>
                   <option value="Professional Services (Accounting/CPA/Law)" className="bg-slate-950 text-slate-200">Professional Services (Accounting/Law)</option>
@@ -1508,14 +1509,6 @@ export default function App() {
                     <li><strong className="text-slate-100">BiggerPockets Forums:</strong> Zoning agenda tracking, permit limits.</li>
                     <li><strong className="text-slate-100">ActiveRain:</strong> Real estate listings and broker client pipeline.</li>
                     <li><strong className="text-slate-100">Reddit r/realtors / r/PropertyManagement:</strong> Tenant communication struggles.</li>
-                  </ul>
-                </div>
-
-                <div className="space-y-1 pt-3">
-                  <span className="font-bold text-rose-400 block font-mono text-[11px]">🩺 Healthcare Operations</span>
-                  <ul className="list-disc list-inside space-y-1 text-slate-300 text-[11px]">
-                    <li><strong className="text-slate-100">Medical Practice Manager Forums:</strong> Patient check-ins, fax problems.</li>
-                    <li><strong className="text-slate-100">Reddit r/medicaloffice / r/medicine:</strong> EHR transcribing & PDF Ingestion.</li>
                   </ul>
                 </div>
 

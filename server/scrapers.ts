@@ -662,7 +662,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
       const primaryTarget = activeTargets[0] || { urlOrPath: "smallbusiness", name: "r/smallbusiness" };
       const subreddit = (primaryTarget.urlOrPath || primaryTarget.name || "smallbusiness").replace(/^r\//i, "");
-      
+
       logs.push(`[Reddit] Crawling 1-2 pages of authentic discussions from r/${subreddit} (via RSS & Search API)...`);
       const hits = await scrapeRedditPublicJSON(targetKeyword, subreddit, undefined, subrequestBudget);
       rawScrapedPool.push(...hits);
@@ -670,7 +670,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
     } else if (targetPlatform.platformId === "discourse" || targetPlatform.platformId === "bizwarriors") {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
       const targetsToScan = activeTargets.length > 0 ? activeTargets.slice(0, 3) : [{ urlOrPath: "community.make.com", name: "Make Community" }];
-      
+
       for (const target of targetsToScan) {
         logs.push(`[Discourse] Deep crawling forum "${target.name}" (${target.urlOrPath})...`);
         const hits = await scrapeDiscourse(target.urlOrPath, targetKeyword, targetSector, undefined, subrequestBudget);
@@ -679,7 +679,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
       }
     } else if (targetPlatform.platformId === "rss") {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
-      const matchingTargets = activeTargets.filter((t: any) => 
+      const matchingTargets = activeTargets.filter((t: any) =>
         t.name.toLowerCase().includes(targetSector.toLowerCase().slice(0, 6)) ||
         t.urlOrPath.toLowerCase().includes(targetSector.toLowerCase().slice(0, 6))
       );
@@ -701,7 +701,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
     } else if (targetPlatform.platformId === "firecrawl" && process.env.FIRECRAWL_API_KEY) {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
       const primaryTarget = activeTargets[0] || { urlOrPath: "https://www.biggerpockets.com/forums", name: "BiggerPockets Forums" };
-      
+
       logs.push(`[Firecrawl] Crawling business forum: ${primaryTarget.name}...`);
       const hits = await scrapeWithFirecrawl(primaryTarget.urlOrPath, primaryTarget.name || "Web Target");
       rawScrapedPool.push(...hits);
@@ -709,7 +709,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
     } else if (targetPlatform.platformId === "discord" && targetPlatform.botToken) {
       const activeTargets = targetPlatform.targets?.filter((t: any) => t.isEnabled) || [];
       const primaryTarget = activeTargets[0] || { urlOrPath: "general", name: "Contractor Server" };
-      
+
       logs.push(`[Discord] Scanning message history from #${primaryTarget.name}...`);
       const hits = await scrapeDiscordMessages(targetPlatform.botToken, primaryTarget.urlOrPath);
       rawScrapedPool.push(...hits);
@@ -801,7 +801,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
         if (!opp.title && !opp.problemSummary) continue;
 
         // Match original source post or fallback to candidate pool
-        const matchedComment = candidatePool.find((c: any) => 
+        const matchedComment = candidatePool.find((c: any) =>
           (c.sourceUrl && opp.sourceUrl && c.sourceUrl === opp.sourceUrl) ||
           (c.title && opp.title && c.title.toLowerCase().includes(opp.title.toLowerCase()))
         ) || candidatePool[foundOpps.length % candidatePool.length];
@@ -837,7 +837,7 @@ export async function executeBotFleetSweep(config: any, options?: { platform?: s
       // Deduplicate against active opportunities
       const existingUrls = new Set(activeOpps.map((o: any) => o.sourceUrl || o.originalSourceLink));
       const freshOpps = foundOpps.filter((o: any) => !existingUrls.has(o.sourceUrl));
-      
+
       const mergedOpps = [...freshOpps, ...activeOpps];
       saveOpportunities(mergedOpps);
       logs.push(`[SYSTEM] Saved ${freshOpps.length} fresh opportunities (${foundOpps.length} total qualified) to database.`);

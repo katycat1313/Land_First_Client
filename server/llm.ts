@@ -90,11 +90,11 @@ export async function generateSemanticQueries(targetSector: string, keyword: str
   }
 
   const sectorKeywords: Record<string, string[]> = {
-    "Healthcare Operations": [
-      "receptionist rude complain",
-      "patients complaining wait time clinic",
-      "front desk forgot appointment paper",
-      "sick of patient scheduling calling"
+    "Home Service Contractors (HVAC/Plumbing)": [
+      "hvac dispatch software headache",
+      "plumber lost invoice spreadsheet",
+      "tired of paper job estimates contractor",
+      "missed customer call lost lead roofing"
     ],
     "Real Estate & Property Management": [
       "tenant complaining about maintenance",
