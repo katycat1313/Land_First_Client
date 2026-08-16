@@ -657,23 +657,36 @@ export default function App() {
         method: "POST"
       });
       if (!res.ok) throw new Error("Bot Fleet discovery sweep cycle failed.");
-      const data = await res.json();
       
-      // Stream logs slowly into the terminal console for realistic pacing and incredible user experience!
-      let logIndex = 0;
+      let lastLogIndex = 0;
       setRunLogs([]);
-      
-      const interval = setInterval(() => {
-        if (logIndex < data.logs.length) {
-          setRunLogs(prev => [...prev, data.logs[logIndex]]);
-          logIndex++;
-        } else {
+
+      // Poll status every 1.5 seconds to pull new logs in real-time
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await fetch("/api/crawl/status");
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            
+            // Append any new logs
+            if (statusData.logs && statusData.logs.length > lastLogIndex) {
+              const newLogs = statusData.logs.slice(lastLogIndex);
+              setRunLogs(prev => [...prev, ...newLogs]);
+              lastLogIndex = statusData.logs.length;
+            }
+            
+            if (!statusData.active) {
+              clearInterval(interval);
+              setIsSweepingBot(false);
+              fetchData();
+            }
+          }
+        } catch (pollErr) {
           clearInterval(interval);
           setIsSweepingBot(false);
-          // Refresh opportunities and stats
-          fetchData();
+          console.error("Error polling sweep status:", pollErr);
         }
-      }, 350);
+      }, 1500);
       
     } catch (err: any) {
       console.error(err);

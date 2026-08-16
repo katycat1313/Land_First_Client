@@ -1710,24 +1710,55 @@ This will automatically update your database and notes so you do not forget them
                   headers: { "Content-Type": "application/json" }
                 }).then(async (res) => {
                   if (res.ok) {
-                    const data = await res.json();
-                    const foundCount = data.foundOpps ? data.foundOpps.length : 0;
-                    onRefreshOpportunities?.();
-                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Sweep complete! Found ${foundCount} new opportunities.`]);
-                    
-                    // Inject a system notice text directly into the voice session history to inform PAC
-                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                      dgSocketRef.current.send(JSON.stringify({
-                        type: "InjectUserMessage",
-                        content: `SYSTEM: Background lead sweep completed. Found ${foundCount} new opportunities. Let the user know!`
-                      }));
-                    }
+                    setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Sweep initiated on server.`]);
+                    // Poll crawl status until it's finished
+                    const pollInterval = setInterval(async () => {
+                      try {
+                        const statusRes = await apiFetch("/api/crawl/status");
+                        if (statusRes.ok) {
+                          const statusData = await statusRes.json();
+                          if (!statusData.active) {
+                            clearInterval(pollInterval);
+                            const foundCount = statusData.foundOppsCount || 0;
+                            onRefreshOpportunities?.();
+                            setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Sweep complete! Found ${foundCount} new opportunities.`]);
+                            
+                            // Inject a system notice text directly into the voice session history to inform PAC
+                            if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
+                              dgSocketRef.current.send(JSON.stringify({
+                                type: "InjectUserMessage",
+                                content: `SYSTEM: Background lead sweep completed. Found ${foundCount} new opportunities. Let the user know!`
+                              }));
+                            }
+                          } else {
+                            setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND] Crawling progress: ${statusData.progress}...`]);
+                          }
+                        }
+                      } catch (pollErr) {
+                        clearInterval(pollInterval);
+                        console.error("Error polling crawl status:", pollErr);
+                      }
+                    }, 3000);
                   } else {
                     setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Sweep failed: HTTP ${res.status}`]);
                   }
                 }).catch(err => {
                   setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Sweep failed: ${err.message || err}`]);
                 });
+              } else if (funcName === "check_crawl_status") {
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Checking background crawl status...`]);
+                try {
+                  const res = await apiFetch("/api/crawl/status");
+                  if (res.ok) {
+                    const data = await res.json();
+                    responseOutput = JSON.stringify(data);
+                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Status: ${data.status} (${data.progress}), Discovered: ${data.foundOppsCount}`]);
+                  } else {
+                    responseOutput = `Failed to check crawl status: HTTP ${res.status}`;
+                  }
+                } catch (err: any) {
+                  responseOutput = `Error checking crawl status: ${err.message || err}`;
+                }
               } else if (funcName === "execute_local_command") {
                 const cmd = rawArgs.command;
                 const cwd = rawArgs.cwd;
