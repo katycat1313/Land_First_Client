@@ -1628,8 +1628,8 @@ This will automatically update your database and notes so you do not forget them
                   responseOutput = `Navigated application view to '${targetView}'.`;
                   setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Switched app view to '${targetView}'.`]);
                 }
-              } else if (funcName === "open_opportunity") {
-                const query = (rawArgs.query || rawArgs.id || "").toLowerCase();
+              } else if (funcName === "open_opportunity" || funcName === "pull_up_card") {
+                const query = (rawArgs.query || rawArgs.id || rawArgs.opportunity_id || "").toLowerCase();
                 const matched = opportunities.find(o => 
                   o.id.toLowerCase() === query ||
                   o.id.toLowerCase().includes(query) ||
@@ -1646,6 +1646,53 @@ This will automatically update your database and notes so you do not forget them
                   setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Displayed opportunity card '${matched.title || matched.id}' on screen.`]);
                 } else {
                   responseOutput = `No opportunity card found matching query '${query}'.`;
+                }
+              } else if (funcName === "list_opportunities") {
+                const list = (opportunities || []).map(o => ({
+                  id: o.id,
+                  title: o.title,
+                  industry: o.industry,
+                  classification: o.classification || "help_seeker",
+                  status: o.status || "New"
+                }));
+                responseOutput = JSON.stringify({ opportunities: list });
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Checked pipeline database. Found ${list.length} active opportunities.`]);
+              } else if (funcName === "update_opportunity_card") {
+                const targetId = rawArgs.opportunity_id;
+                const status = rawArgs.status;
+                const notes = rawArgs.notes;
+                const contactEmail = rawArgs.contact_email;
+                const estimatedDealValue = rawArgs.estimated_deal_value;
+
+                const matchedOpp = (opportunities || []).find(o => o.id === targetId);
+                if (matchedOpp) {
+                  const updatedOpp = {
+                    ...matchedOpp,
+                    ...(status ? { status } : {}),
+                    ...(notes ? { notes } : {}),
+                    ...(contactEmail ? { contactEmail } : {}),
+                    ...(estimatedDealValue !== undefined ? { estimatedDealValue } : {})
+                  };
+
+                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Persisting changes to Opportunity Card: "${matchedOpp.title || matchedOpp.id}"...`]);
+                  try {
+                    const res = await apiFetch("/api/opportunities/save", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(updatedOpp)
+                    });
+                    if (res.ok) {
+                      onRefreshOpportunities?.();
+                      responseOutput = `Successfully updated opportunity card ${targetId} in the database.`;
+                      setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Successfully updated Opportunity Card: "${matchedOpp.title || matchedOpp.id}"`]);
+                    } else {
+                      responseOutput = `Failed to save changes: HTTP ${res.status}`;
+                    }
+                  } catch (err: any) {
+                    responseOutput = `Failed to save changes: ${err.message || err}`;
+                  }
+                } else {
+                  responseOutput = `Opportunity card matching ID ${targetId} not found in database.`;
                 }
               } else if (funcName === "run_diagnostics") {
                 await runDiagnosticsCheck();
@@ -1723,216 +1770,6 @@ This will automatically update your database and notes so you do not forget them
                   setPacStatus("speaking");
                 } catch (err) {
                   console.error("Failed to decode base64 audio chunk:", err);
-                }
-              }
-            } else if (msg.type === "FunctionCallRequest") {
-              const calls = msg.functions || [];
-              for (const call of calls) {
-                console.log(`[P.A.C. Tool] Received FunctionCallRequest: ${call.name} (ID: ${call.id})`, call.arguments);
-                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Partner requested execution of: ${call.name}`]);
-                
-                if (call.name === "list_opportunities") {
-                  const list = (opportunities || []).map(o => ({
-                    id: o.id,
-                    title: o.title,
-                    industry: o.industry,
-                    classification: o.classification || "help_seeker"
-                  }));
-                  
-                  if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                    dgSocketRef.current.send(JSON.stringify({
-                      type: "FunctionCallResponse",
-                      id: call.id,
-                      name: "list_opportunities",
-                      content: JSON.stringify({ opportunities: list })
-                    }));
-                    console.log(`[P.A.C. Tool] Sent FunctionCallResponse for list_opportunities (ID: ${call.id})`);
-                  }
-                } else if (call.name === "pull_up_card") {
-                  let args: any = {};
-                  try {
-                    args = JSON.parse(call.arguments || "{}");
-                  } catch (e) {
-                    console.error("Failed to parse function call arguments:", e);
-                  }
-                  
-                  const targetId = args.opportunity_id;
-                  const matchedOpp = (opportunities || []).find(o => 
-                    o.id === targetId || 
-                    (o.title && o.title.toLowerCase().includes(String(targetId).toLowerCase()))
-                  );
-                  
-                  if (matchedOpp) {
-                    onSelectOpportunity?.(matchedOpp);
-                    if (onNavigateView) onNavigateView('board');
-                    setIsMinimized(true);
-                    setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Automatically pulled up Opportunity Card: "${matchedOpp.title || matchedOpp.id}" on screen.`]);
-                    
-                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                      dgSocketRef.current.send(JSON.stringify({
-                        type: "FunctionCallResponse",
-                        id: call.id,
-                        name: "pull_up_card",
-                        content: JSON.stringify({ success: true, message: `Successfully opened card: ${matchedOpp.title}` })
-                      }));
-                      console.log(`[P.A.C. Tool] Sent FunctionCallResponse for pull_up_card success (ID: ${call.id})`);
-                    }
-                  } else {
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Opportunity ID "${targetId}" not found.`]);
-                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                      dgSocketRef.current.send(JSON.stringify({
-                        type: "FunctionCallResponse",
-                        id: call.id,
-                        name: "pull_up_card",
-                        content: JSON.stringify({ success: false, error: "Opportunity ID not found in dashboard." })
-                      }));
-                      console.log(`[P.A.C. Tool] Sent FunctionCallResponse for pull_up_card failure (ID: ${call.id})`);
-                    }
-                  }
-                } else if (call.name === "update_opportunity_card") {
-                  let args: any = {};
-                  try {
-                    args = JSON.parse(call.arguments || "{}");
-                  } catch (e) {
-                    console.error("Failed to parse function call arguments:", e);
-                  }
-                  
-                  const targetId = args.opportunity_id;
-                  const matchedOpp = (opportunities || []).find(o => o.id === targetId);
-                  
-                  if (matchedOpp) {
-                    const status = args.status;
-                    const notes = args.notes;
-                    const contactEmail = args.contact_email;
-                    const estimatedDealValue = args.estimated_deal_value;
-                    
-                    const updatedOpp = {
-                      ...matchedOpp,
-                      ...(status ? { status } : {}),
-                      ...(notes ? { notes } : {}),
-                      ...(contactEmail ? { contactEmail } : {}),
-                      ...(estimatedDealValue !== undefined ? { estimatedDealValue } : {})
-                    };
-                    
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Persisting changes to Opportunity Card: "${matchedOpp.title || matchedOpp.id}"...`]);
-                    
-                    // Call the local API /api/opportunities/save to persist the changes
-                    apiFetch("/api/opportunities/save", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(updatedOpp)
-                    }).then(res => {
-                      if (res.ok) {
-                        onRefreshOpportunities?.();
-                        setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Successfully updated Opportunity Card: "${matchedOpp.title || matchedOpp.id}"`]);
-                        
-                        if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                          dgSocketRef.current.send(JSON.stringify({
-                            type: "FunctionCallResponse",
-                            id: call.id,
-                            name: "update_opportunity_card",
-                            content: JSON.stringify({ success: true, message: `Successfully updated card: ${matchedOpp.title}` })
-                          }));
-                        }
-                      } else {
-                        throw new Error(`Failed to save: ${res.status}`);
-                      }
-                    }).catch(err => {
-                      console.error("Failed to save opportunity changes via tool:", err);
-                      setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Failed to save updates to database.`]);
-                      if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                        dgSocketRef.current.send(JSON.stringify({
-                          type: "FunctionCallResponse",
-                          id: call.id,
-                          name: "update_opportunity_card",
-                          content: JSON.stringify({ success: false, error: err.message || "Failed to save card updates." })
-                        }));
-                      }
-                    });
-                  } else {
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Opportunity ID "${targetId}" not found for update.`]);
-                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                      dgSocketRef.current.send(JSON.stringify({
-                        type: "FunctionCallResponse",
-                        id: call.id,
-                        name: "update_opportunity_card",
-                        content: JSON.stringify({ success: false, error: "Opportunity ID not found in database." })
-                      }));
-                    }
-                  }
-                } else if (call.name === "trigger_lead_sweep") {
-                  setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📡 Triggering active lead sweep across configured platforms...`]);
-                  try {
-                    const res = await apiFetch("/api/bot-config/trigger-sweep", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" }
-                    });
-                    if (res.ok) {
-                      const data = await res.json();
-                      const foundCount = data.foundOpps ? data.foundOpps.length : 0;
-                      onRefreshOpportunities?.();
-                      setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Sweep complete! Found ${foundCount} new opportunities.`]);
-                      
-                      if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                        dgSocketRef.current.send(JSON.stringify({
-                          type: "FunctionCallResponse",
-                          id: call.id,
-                          name: "trigger_lead_sweep",
-                          content: JSON.stringify({ success: true, message: `Lead sweep completed. Found ${foundCount} opportunities.`, details: data.logs || [] })
-                        }));
-                      }
-                    } else {
-                      throw new Error(`Sweep returned status ${res.status}`);
-                    }
-                  } catch (err: any) {
-                    console.error("Failed to run lead sweep via tool:", err);
-                    setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Sweep failed: ${err.message || err}`]);
-                    if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                      dgSocketRef.current.send(JSON.stringify({
-                        type: "FunctionCallResponse",
-                        id: call.id,
-                        name: "trigger_lead_sweep",
-                        content: JSON.stringify({ success: false, error: err.message || "Failed to trigger sweep." })
-                      }));
-                    }
-                  }
-                } else if (call.name === "execute_local_command") {
-                   const cmdArgs = JSON.parse(call.arguments || "{}");
-                   const cmd = cmdArgs.command;
-                   const cwd = cmdArgs.cwd;
-                   setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🖥️ Running local command: "${cmd}"...`]);
-                   try {
-                     const res = await apiFetch("/api/bot-config/execute-local", {
-                       method: "POST",
-                       headers: { "Content-Type": "application/json" },
-                       body: JSON.stringify({ command: cmd, cwd })
-                     });
-                     const data = await res.json();
-                     if (res.ok && data.success !== false) {
-                       setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] Command complete! stdout: ${data.stdout?.substring(0, 60) || "none"}`]);
-                       if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                         dgSocketRef.current.send(JSON.stringify({
-                           type: "FunctionCallResponse",
-                           id: call.id,
-                           name: "execute_local_command",
-                           content: JSON.stringify({ success: true, stdout: data.stdout, stderr: data.stderr })
-                         }));
-                       }
-                     } else {
-                       throw new Error(data.error || data.stderr || "Command execution failed.");
-                     }
-                   } catch (err: any) {
-                     console.error("Failed to execute command via tool:", err);
-                     setComputerLogs(prev => [...prev, `[P.A.C. TOOL-ERR] Command failed: ${err.message || err}`]);
-                     if (dgSocketRef.current && dgSocketRef.current.readyState === WebSocket.OPEN) {
-                       dgSocketRef.current.send(JSON.stringify({
-                         type: "FunctionCallResponse",
-                         id: call.id,
-                         name: "execute_local_command",
-                         content: JSON.stringify({ success: false, error: err.message || "Failed to execute command." })
-                       }));
-                     }
-                   }
                 }
               }
             } else if (msg.type === "SystemNotice") {
