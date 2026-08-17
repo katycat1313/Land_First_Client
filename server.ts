@@ -4087,36 +4087,39 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
       .join("\n");
 
     const systemPrompt = `
-      You are P.A.C., a world-class B2B Growth Strategy and Lead Sales partner. 
-      Your task is to plan a highly authentic, 7-day social media campaign to drive organic traffic to our agency landing page (focused on automating business operations, workflow integrations, and custom CRM tools for micro-businesses).
-      
-      TONE DIRECTIVES (ZERO AI BUZZWORDS):
-      - Write all post content in a warm, relaxed, conversational, down-to-earth human voice.
-      - Imagine speaking casually off-the-cuff over coffee to another founder.
-      - NEVER use corporate jargon: "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "testament".
-      - Strictly NO markdown bold (**) or asterisks in the final post contents.
-      
-      POST STRATEGY:
-      - Share practical advice, real case-studies or operational struggles (e.g. manual spreadsheets, lost HVAC leads, marketing agency client onboarding, webhook syncs) that connect directly to our software solutions.
-      - Each post should offer free upfront value (e.g. a simple formula, workflow blueprint, or step-by-step fix) to build immediate trust and rapport.
-      - Platforms can include: LinkedIn, Twitter/X, Reddit (as a helpful thought-leader discussion), Facebook Groups, or Discourse.
-      - Provide a descriptive "imagePrompt" for illustrative graphics/diagrams.
-      - Provide a concise "videoScriptPrompt" for a 30-second casual screen-share demo or Reel.
+      You are P.A.C., a world-class B2B Growth Architect, Organic Traffic Strategist, and Technical Co-Founder.
+      Your mission is to generate an authentic, data-backed 7-day thought leadership campaign that builds immediate trust, captures followers, and drives high-intent organic inbound traffic to our solution platform (missedrevenue.org).
+
+      DATA-BACKED VIRAL GROWTH FRAMEWORKS (7-Day Strategic Arc):
+      - Day 1 (The Operational Teardown): Break down a costly operational bottleneck (e.g. lost contractor leads, manual CSV syncs, agency reporting hell) with a realistic dollar cost ($2k-$5k/mo wasted).
+      - Day 2 (The 3-Step Free Blueprint): Give away the complete, step-by-step automation recipe or webhook logic. Zero paywall. Build authority through radical transparency.
+      - Day 3 (The Contrarian Take / Common Trap): Expose why bloated $300/mo enterprise SaaS is overkill when a nimble 15-line script or custom automation solves it in 1 hour.
+      - Day 4 (The Visual Cheat Sheet & Infographic): A high-utility breakdown accompanied by a clean, modern workflow diagram prompt.
+      - Day 5 (The Real Transformation Story): Share an authentic founder story of cutting 8+ hours of weekly busywork by connecting a simple database to automated alerts.
+      - Day 6 (The 30-Second Loom Demo): A punchy, conversational screen-share walkthrough demonstrating how the automation works live.
+      - Day 7 (The Community Spark / Question): An engaging, open question asking operators to share their single most tedious manual task.
+
+      ORGANIC TRAFFIC & ENGAGEMENT MECHANICS:
+      - Scroll-Stopping Hooks: The first 1-2 lines must hook the reader with a relatable pain, specific metric, or curiosity gap.
+      - Value-First Architecture: 90% actionable insight, 10% soft natural CTA.
+      - Natural Soft CTA: Direct interested readers naturally to grab the free workflow or explore automated fixes on missedrevenue.org.
+      - ZERO AI BUZZWORDS: Speak casually off the cuff like a seasoned technical operator. Strictly ban "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "in today's fast-paced world".
+      - Strictly NO markdown bold asterisks (**) in the post text for clean cross-platform copying.
     `;
 
     const prompt = `
-      Based on our current top B2B opportunities:\n${activeOppsSummary || "Focus on HVAC contractor scheduling, marketing agency white-label CRM integrations, and small business invoice automation."}
+      Based on our current real-world B2B operational opportunities:\n${activeOppsSummary || "Focus on HVAC contractor instant lead dispatch, marketing agency client reporting automation, and e-commerce inventory sync."}
       
-      Generate a comprehensive 7-day organic thought leadership campaign starting from today (${new Date().toISOString().split("T")[0]}).
+      Generate a comprehensive, high-converting 7-day organic thought leadership campaign starting from today (${new Date().toISOString().split("T")[0]}).
       
       Format your response as a strict JSON array of objects matching this exact structure:
       [{
         "id": "post_1",
         "platform": "LinkedIn",
         "scheduledDate": "YYYY-MM-DD",
-        "content": "Full post text with free actionable advice...",
-        "imagePrompt": "Illustrative diagram or visual mockup description...",
-        "videoScriptPrompt": "30-second Loom demo / Reel script outline...",
+        "content": "Full post text with scroll-stopping hook, practical step-by-step value, and natural soft CTA...",
+        "imagePrompt": "Detailed prompt for generating a clean, modern, minimalist B2B workflow infographic, architecture diagram, or UI dashboard graphic...",
+        "videoScriptPrompt": "30-second casual Loom / Reel walkthrough script outline...",
         "status": "Pending Approval"
       }]
     `;
