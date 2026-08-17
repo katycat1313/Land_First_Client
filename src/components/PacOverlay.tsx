@@ -2859,7 +2859,7 @@ registerProcessor('pcm-processor', PCMProcessor);
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 p-4 rounded-full bg-gradient-to-tr from-indigo-600 via-violet-600 to-indigo-500 hover:from-indigo-500 hover:to-violet-500 text-white shadow-2xl hover:shadow-indigo-500/20 transition-all duration-300 z-50 flex items-center gap-2 cursor-pointer border border-indigo-400/30 group active:scale-95"
+        className="fixed bottom-6 right-6 p-4 rounded-full bg-gradient-to-tr from-teal-600 via-cyan-600 to-emerald-500 hover:from-teal-500 hover:to-cyan-400 text-white shadow-[0_0_30px_rgba(20,184,166,0.5)] hover:shadow-cyan-400/40 transition-all duration-300 z-50 flex items-center gap-2 cursor-pointer border-2 border-teal-300/60 group active:scale-95"
         title={
           isConnected
             ? "P.A.C. (Live Voice Connected)"
@@ -2895,17 +2895,17 @@ registerProcessor('pcm-processor', PCMProcessor);
   return (
     <div
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className={`fixed w-[400px] rounded-2xl bg-slate-950/95 border-2 ${pacStatus === "speaking" ? "border-cyan-500/40 shadow-cyan-950/40" :
-          pacStatus === "listening" ? "border-emerald-500/40 shadow-emerald-950/40" :
-            pacStatus === "thinking" ? "border-indigo-500/40 shadow-indigo-950/40" :
-              "border-slate-800 shadow-black/80"
+      className={`fixed w-[420px] rounded-2xl bg-gradient-to-b from-[#042f2e]/98 via-[#064e3b]/98 to-[#022c22]/98 border-2 ${pacStatus === "speaking" ? "border-cyan-400 shadow-[0_0_35px_rgba(34,211,238,0.4)]" :
+          pacStatus === "listening" ? "border-emerald-400 shadow-[0_0_35px_rgba(52,211,153,0.4)]" :
+            pacStatus === "thinking" ? "border-teal-300 shadow-[0_0_35px_rgba(45,212,191,0.4)]" :
+              "border-teal-400/70 shadow-[0_0_40px_rgba(20,184,166,0.35)]"
         } shadow-2xl backdrop-blur-md transition-all duration-200 z-50 overflow-hidden flex flex-col ${isMinimized ? "h-auto" : "h-[580px] max-h-[90vh]"
         }`}
       onMouseDown={handleMouseDown}
       id="pac-floating-widget"
     >
-      {/* 1. Glass Drag Handle & Header */}
-      <div className="drag-handle px-4 py-3 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between cursor-move select-none">
+      {/* 1. Turquoise Drag Handle & Header */}
+      <div className="drag-handle px-4 py-3 bg-[#0d4a44]/95 border-b border-teal-500/50 flex items-center justify-between cursor-move select-none shadow-sm">
         <div className="flex items-center gap-2">
           {/* P.A.C Brain Orb Indicator */}
           <div className="relative flex items-center justify-center h-6 w-6">
@@ -3047,7 +3047,7 @@ registerProcessor('pcm-processor', PCMProcessor);
             </div>
           )}
           {/* Menu Tabs */}
-          <div className="flex border-b border-slate-900 bg-slate-900/40 text-center font-mono overflow-x-auto whitespace-nowrap scrollbar-none">
+          <div className="flex border-b border-teal-500/30 bg-[#063b36]/90 text-center font-mono overflow-x-auto whitespace-nowrap scrollbar-none">
             {[
               { id: "chat", label: "💬 Brainstorm" },
               { id: "computer", label: "🖥️ Computer" },
@@ -3060,8 +3060,8 @@ registerProcessor('pcm-processor', PCMProcessor);
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`px-3 py-2 text-[10px] font-bold uppercase border-b-2 transition shrink-0 ${activeTab === tab.id
-                    ? "border-cyan-500 text-white bg-slate-950/20"
-                    : "border-transparent text-slate-500 hover:text-slate-300"
+                    ? "border-teal-300 text-white bg-teal-900/60 font-black shadow-inner"
+                    : "border-transparent text-teal-200/60 hover:text-white hover:bg-teal-900/30"
                   }`}
                 type="button"
               >
@@ -3071,7 +3071,7 @@ registerProcessor('pcm-processor', PCMProcessor);
           </div>
 
           {/* Core Scroll Window Container */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-slate-950/20 scrollbar-thin">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 bg-[#022421]/90 scrollbar-thin">
 
             {/* SCREEN-AWARE EYE STATUS ALERTER */}
             {isScreenCaptureActive && (
@@ -3097,15 +3097,15 @@ registerProcessor('pcm-processor', PCMProcessor);
                   {messages.map((m, idx) => (
                     <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[85%] rounded-xl p-2.5 text-xs leading-relaxed ${m.role === "user"
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-900 border border-slate-800 text-slate-200"
+                          ? "bg-teal-600 text-white font-medium shadow-md"
+                          : "bg-[#0b3e39] border border-teal-500/40 text-teal-50 shadow-sm"
                         }`}>
-                        <div className="flex items-center gap-1 text-[9px] font-mono opacity-40 mb-1">
+                        <div className="flex items-center gap-1 text-[9px] font-mono opacity-75 mb-1 text-teal-200">
                           {m.role === "user" ? <User size={9} /> : <Bot size={9} />}
                           <span>{m.role === "user" ? "You" : "P.A.C."}</span>
                           <span className="ml-auto">{m.time}</span>
                         </div>
-                        <p className="whitespace-pre-wrap">{m.text}</p>
+                        <p className="whitespace-pre-wrap text-teal-50">{m.text}</p>
                       </div>
                     </div>
                   ))}
@@ -3119,7 +3119,7 @@ registerProcessor('pcm-processor', PCMProcessor);
                       handleSendInput(textInput);
                     }
                   }}
-                  className="pt-2 border-t border-slate-800/60 flex gap-2"
+                  className="pt-2 border-t border-teal-500/40 flex gap-2"
                 >
                   <input
                     type="text"
@@ -3127,12 +3127,12 @@ registerProcessor('pcm-processor', PCMProcessor);
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Type a message or instruction for P.A.C..."
-                    className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-lg text-xs text-slate-100 placeholder-slate-700 font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/20"
+                    className="flex-1 px-3 py-1.5 bg-[#03201e] border border-teal-500/50 rounded-lg text-xs text-teal-50 placeholder-teal-300/40 font-mono focus:outline-none focus:border-teal-300 focus:ring-1 focus:ring-teal-300/30"
                   />
                   <button
                     type="submit"
                     disabled={!textInput.trim() || pacStatus === "thinking"}
-                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:text-slate-600 text-white font-mono text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:bg-teal-950 disabled:text-teal-700 text-white font-mono text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1 cursor-pointer shadow-md"
                   >
                     <Send size={10} />
                     <span>Reply</span>
