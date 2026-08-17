@@ -16,6 +16,7 @@ import {
 import { initAuth, googleSignIn, logout as googleLogout } from "./lib/firebaseAuth";
 import { User } from "firebase/auth";
 import PublicLandingView from "./components/PublicLandingView";
+import { SocialPostingCalendar } from "./components/SocialPostingCalendar";
 
 export default function App() {
   const [appMode, setAppMode] = useState<'public' | 'dashboard'>('public');
@@ -71,7 +72,23 @@ export default function App() {
 
   // Bot Fleet & Crawler Strategy states
   const [botConfig, setBotConfig] = useState<any>(null);
-  const [activeView, setActiveView] = useState<'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning'>('board');
+  const [activeView, setActiveView] = useState<'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting'>('board');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname === '/social-posting' || window.location.pathname.startsWith('/social-posting')) {
+        setActiveView('social-posting');
+        setAppMode('dashboard');
+      }
+    }
+  }, []);
+
+  const handleSelectView = (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting') => {
+    setActiveView(view);
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', view === 'social-posting' ? '/social-posting' : '/');
+    }
+  };
 
   const handleUpdateOpportunity = async (id: string, updates: Partial<Opportunity>) => {
     try {
@@ -1546,7 +1563,7 @@ export default function App() {
             {/* View Selection Tab Header */}
             <div className="flex flex-wrap border-b border-slate-900 pb-px gap-1">
               <button
-                onClick={() => setActiveView('board')}
+                onClick={() => handleSelectView('board')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition ${
                   activeView === 'board' 
                     ? "border-indigo-500 text-white" 
@@ -1558,7 +1575,7 @@ export default function App() {
                 📋 Board
               </button>
               <button
-                onClick={() => setActiveView('crm')}
+                onClick={() => handleSelectView('crm')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
                   activeView === 'crm' 
                     ? "border-emerald-500 text-emerald-300" 
@@ -1571,7 +1588,7 @@ export default function App() {
                 📊 CRM Ledger
               </button>
               <button
-                onClick={() => setActiveView('memory')}
+                onClick={() => handleSelectView('memory')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
                   activeView === 'memory' 
                     ? "border-purple-500 text-purple-300" 
@@ -1584,7 +1601,7 @@ export default function App() {
                 🧠 Memory
               </button>
               <button
-                onClick={() => setActiveView('bots')}
+                onClick={() => handleSelectView('bots')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
                   activeView === 'bots' 
                     ? "border-indigo-500 text-white" 
@@ -1596,7 +1613,7 @@ export default function App() {
                 🤖 Bot Fleet
               </button>
               <button
-                onClick={() => setActiveView('partner')}
+                onClick={() => handleSelectView('partner')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
                   activeView === 'partner' 
                     ? "border-indigo-500 text-white" 
@@ -1612,7 +1629,7 @@ export default function App() {
                 🧠 Sales Co-Pilot
               </button>
               <button
-                onClick={() => setActiveView('learning')}
+                onClick={() => handleSelectView('learning')}
                 className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
                   activeView === 'learning' 
                     ? "border-indigo-500 text-white" 
@@ -1622,6 +1639,19 @@ export default function App() {
                 type="button"
               >
                 🎯 Self-Learning
+              </button>
+              <button
+                onClick={() => handleSelectView('social-posting')}
+                className={`px-3 py-2.5 text-xs font-mono font-bold uppercase tracking-wider border-b-2 transition flex items-center gap-1.5 ${
+                  activeView === 'social-posting' 
+                    ? "border-teal-400 text-teal-200 bg-teal-950/40 shadow-inner" 
+                    : "border-transparent text-teal-400/70 hover:text-teal-200"
+                }`}
+                id="tab-social-posting-btn"
+                type="button"
+              >
+                <Calendar className="w-3.5 h-3.5 text-teal-400" />
+                🗓️ Social Posting & Calendar
               </button>
             </div>
 
@@ -2576,6 +2606,12 @@ export default function App() {
                   </div>
 
                 </div>
+              </div>
+            )}
+
+            {activeView === 'social-posting' && (
+              <div className="space-y-6 animate-fade-in">
+                <SocialPostingCalendar />
               </div>
             )}
 
