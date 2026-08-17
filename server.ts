@@ -5761,6 +5761,23 @@ export default {
       ctx.waitUntil(syncSupabaseOnStartup());
     }
 
+    // 0. If this is a frontend navigation or asset request (not /api or /ws), serve via env.ASSETS with SPA fallback
+    if (!url.pathname.startsWith("/api") && !url.pathname.startsWith("/ws") && !url.pathname.startsWith("/auth")) {
+      if (env.ASSETS) {
+        try {
+          const assetRes = await env.ASSETS.fetch(request);
+          if (assetRes.status !== 404) {
+            return assetRes;
+          }
+          // Single-page application fallback to /index.html
+          const indexUrl = new URL("/index.html", request.url);
+          return await env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+        } catch (e) {
+          console.error("[WORKER-ASSETS] Error fetching asset:", e);
+        }
+      }
+    }
+
     // 1. Intercept Deepgram WebSocket Upgrade request in Workers environment
     if (url.pathname === "/api/deepgram/ws" && request.headers.get("Upgrade") === "websocket") {
       let apiKey = url.searchParams.get("key");
