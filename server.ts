@@ -4221,6 +4221,124 @@ app.post("/api/social-campaigns/reject", async (req, res) => {
   }
 });
 
+// POST /api/social-campaigns/generate-image
+app.post("/api/social-campaigns/generate-image", async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: "Prompt is required." });
+
+  try {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey) {
+      console.log(`[Campaigns Image] Generating high-res visual via OpenAI DALL-E 3...`);
+      const response = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openaiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "dall-e-3",
+          prompt: `Clean, modern, minimalist B2B infographic or diagram: ${prompt}`,
+          n: 1,
+          size: "1024x1024"
+        })
+      });
+      if (response.ok) {
+        const json: any = await response.json();
+        if (json.data && json.data[0]?.url) {
+          return res.json({ success: true, imageUrl: json.data[0].url });
+        }
+      }
+    }
+    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=500&nologo=true&private=true`;
+    res.json({ success: true, imageUrl: fallbackUrl });
+  } catch (err: any) {
+    console.error("[Campaigns Image Generation Error]:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/social-campaigns/generate-video
+app.post("/api/social-campaigns/generate-video", async (req, res) => {
+  const { promptText, referenceImageUrl, duration = 5, ratio = "1280:720" } = req.body;
+  if (!promptText && !referenceImageUrl) {
+    return res.status(400).json({ error: "Prompt or reference image is required." });
+  }
+
+  const runwayKey = process.env.RUNWAY_API_KEY;
+  if (!runwayKey) {
+    return res.status(400).json({ error: "RUNWAY_API_KEY is not configured in .env." });
+  }
+
+  try {
+    console.log(`[Runway Video] Submitting Gen-3 Alpha Turbo video task (Duration: ${duration}s, Ratio: ${ratio})...`);
+    const endpoint = referenceImageUrl
+      ? "https://api.dev.runwayml.com/v1/image_to_video"
+      : "https://api.dev.runwayml.com/v1/tasks";
+
+    const payload: any = {
+      model: "gen3a_turbo",
+      promptText: promptText || "Dynamic software automation walkthrough",
+      duration: duration === 10 ? 10 : 5,
+      ratio: ratio === "720:1280" ? "720:1280" : "1280:720"
+    };
+
+    if (referenceImageUrl) {
+      payload.promptImage = referenceImageUrl;
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${runwayKey}`,
+        "X-Runway-Version": "2024-11-06",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(`Runway error (${response.status}): ${body}`);
+    }
+
+    const json = JSON.parse(body);
+    res.json({ success: true, taskId: json.id, status: json.status || "PENDING" });
+  } catch (err: any) {
+    console.error("[Runway Video Error]:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/social-campaigns/video-status/:taskId
+app.get("/api/social-campaigns/video-status/:taskId", async (req, res) => {
+  const { taskId } = req.params;
+  const runwayKey = process.env.RUNWAY_API_KEY;
+  if (!runwayKey) {
+    return res.status(400).json({ error: "RUNWAY_API_KEY is not configured." });
+  }
+
+  try {
+    const response = await fetch(`https://api.dev.runwayml.com/v1/tasks/${taskId}`, {
+      headers: {
+        "Authorization": `Bearer ${runwayKey}`,
+        "X-Runway-Version": "2024-11-06"
+      }
+    });
+
+    const json: any = await response.json();
+    const videoUrl = json.output && json.output[0] ? json.output[0] : null;
+    res.json({
+      success: true,
+      status: json.status,
+      progress: json.progress,
+      videoUrl
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/bot-config/trigger-sweep
 app.post("/api/bot-config/trigger-sweep", async (req, res) => {
   try {

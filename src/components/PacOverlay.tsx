@@ -258,6 +258,58 @@ export default function PacOverlay({
     fetchSocialCampaigns();
   }, []);
 
+  const [generatingVideoPostId, setGeneratingVideoPostId] = useState<string | null>(null);
+  const [generatedVideos, setGeneratedVideos] = useState<Record<string, string>>({});
+  const [videoStatusMessages, setVideoStatusMessages] = useState<Record<string, string>>({});
+
+  const handleGenerateRunwayVideo = async (post: any) => {
+    setGeneratingVideoPostId(post.id);
+    setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Submitting task to Runway Gen-3 Alpha Turbo..." }));
+    try {
+      const prompt = post.videoScriptPrompt || post.content || "Dynamic B2B software workflow automation demo";
+      const res = await apiFetch("/api/social-campaigns/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promptText: prompt.substring(0, 500),
+          duration: 5,
+          ratio: "1280:720"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.taskId) {
+        throw new Error(data.error || "Failed to submit video task");
+      }
+      
+      const taskId = data.taskId;
+      setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Rendering video in Runway (approx 30-60s)..." }));
+      
+      const interval = setInterval(async () => {
+        try {
+          const statusRes = await apiFetch(`/api/social-campaigns/video-status/${taskId}`);
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            if (statusData.status === "SUCCEEDED" && statusData.videoUrl) {
+              clearInterval(interval);
+              setGeneratedVideos(prev => ({ ...prev, [post.id]: statusData.videoUrl }));
+              setGeneratingVideoPostId(null);
+              setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Video Render Complete! 🎬" }));
+            } else if (statusData.status === "FAILED") {
+              clearInterval(interval);
+              setGeneratingVideoPostId(null);
+              setVideoStatusMessages(prev => ({ ...prev, [post.id]: "❌ Rendering failed in Runway." }));
+            } else {
+              setVideoStatusMessages(prev => ({ ...prev, [post.id]: `Rendering in Runway (${statusData.status || "PROCESSING"})...` }));
+            }
+          }
+        } catch (e) {}
+      }, 5000);
+    } catch (err: any) {
+      setGeneratingVideoPostId(null);
+      setVideoStatusMessages(prev => ({ ...prev, [post.id]: `❌ Error: ${err.message}` }));
+    }
+  };
+
   const handleGenerateCampaign = async () => {
     setIsLoadingCampaign(true);
     setComputerLogs(prev => [...prev, "[CAMPAIGN-GEN] Planning a fresh 7-day social campaign draft..."]);
@@ -3975,15 +4027,57 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                             </div>
                           </div>
 
-                          {/* Video Script Outline (if available) */}
+                          {/* Video Script Outline & Runway AI Video Generator */}
                           {post.videoScriptPrompt && (
-                            <div className="col-span-1 md:col-span-2 space-y-1.5 bg-slate-950/80 p-2.5 rounded-lg border border-indigo-900/30">
-                              <div className="flex items-center gap-1.5 text-indigo-400 font-mono text-[9px] font-bold uppercase tracking-wider">
-                                <Sparkles size={11} /> 30-Sec Video / Loom Demo Outline
+                            <div className="col-span-1 md:col-span-2 space-y-2 bg-[#03201e] p-3 rounded-lg border border-teal-500/30">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 text-teal-300 font-mono text-[9px] font-bold uppercase tracking-wider">
+                                  <Sparkles size={11} className="text-cyan-400" /> 30-Sec Video / Loom Demo Outline
+                                </div>
+                                
+                                <button
+                                  type="button"
+                                  onClick={() => handleGenerateRunwayVideo(post)}
+                                  disabled={generatingVideoPostId === post.id}
+                                  className="px-2 py-1 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white rounded text-[8.5px] font-bold font-mono transition flex items-center gap-1 shadow cursor-pointer disabled:opacity-50"
+                                >
+                                  {generatingVideoPostId === post.id ? (
+                                    <>
+                                      <span className="h-2 w-2 border border-white border-t-transparent rounded-full animate-spin"></span>
+                                      Rendering...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>🎬 Render Runway AI Video (5s)</span>
+                                    </>
+                                  )}
+                                </button>
                               </div>
-                              <p className="text-[10px] text-slate-300 font-mono leading-relaxed whitespace-pre-wrap">
+
+                              <p className="text-[10px] text-teal-100 font-mono leading-relaxed whitespace-pre-wrap">
                                 {post.videoScriptPrompt}
                               </p>
+
+                              {/* Status message */}
+                              {videoStatusMessages[post.id] && (
+                                <div className="text-[9px] font-mono text-cyan-300 bg-cyan-950/40 p-1.5 rounded border border-cyan-500/20 flex items-center gap-1">
+                                  <span>{videoStatusMessages[post.id]}</span>
+                                </div>
+                              )}
+
+                              {/* Live Video Player if generated */}
+                              {generatedVideos[post.id] && (
+                                <div className="rounded-lg overflow-hidden border border-teal-400/50 bg-black mt-2">
+                                  <video
+                                    src={generatedVideos[post.id]}
+                                    controls
+                                    autoPlay
+                                    loop
+                                    muted
+                                    className="w-full max-h-[220px] object-cover"
+                                  />
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
