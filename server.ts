@@ -4272,20 +4272,37 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
 
   try {
     console.log(`[Runway Video] Submitting Gen-3 Alpha Turbo video task (Duration: ${duration}s, Ratio: ${ratio})...`);
-    const endpoint = referenceImageUrl
-      ? "https://api.dev.runwayml.com/v1/image_to_video"
-      : "https://api.dev.runwayml.com/v1/tasks";
+    const endpoint = "https://api.dev.runwayml.com/v1/image_to_video";
+
+    let finalPromptImage = referenceImageUrl;
+    if (!finalPromptImage) {
+      const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText || "business software automation dashboard")}` + "?width=1280&height=768&nologo=true";
+      try {
+        const imgRes = await fetch(fallbackUrl);
+        if (imgRes.ok) {
+          const arrBuffer = await imgRes.arrayBuffer();
+          const base64Str = Buffer.from(arrBuffer).toString("base64");
+          const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+          finalPromptImage = `data:${contentType};base64,${base64Str}`;
+        }
+      } catch (e) {
+        console.error("Failed to convert image to base64:", e);
+      }
+    }
+
+    if (!finalPromptImage) {
+      finalPromptImage = "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1280&q=80";
+    }
+
+    const validRatio = ratio === "720:1280" || ratio === "9:16" ? "720:1280" : "1280:720";
 
     const payload: any = {
-      model: "gen3a_turbo",
+      model: "gen4_turbo",
+      promptImage: finalPromptImage,
       promptText: promptText || "Dynamic software automation walkthrough",
       duration: duration === 10 ? 10 : 5,
-      ratio: ratio === "720:1280" ? "720:1280" : "1280:720"
+      ratio: validRatio
     };
-
-    if (referenceImageUrl) {
-      payload.promptImage = referenceImageUrl;
-    }
 
     const response = await fetch(endpoint, {
       method: "POST",
