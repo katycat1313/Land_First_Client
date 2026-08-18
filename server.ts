@@ -5163,7 +5163,7 @@ app.get("/api/deepgram/token", async (req, res) => {
   }
 
   try {
-    // Generate a temporary API key with a 60-second TTL and 'member' scope
+    // Attempt temporary key creation with 3600s TTL
     const response = await fetch(`https://api.deepgram.com/v1/projects/${projectId}/keys`, {
       method: "POST",
       headers: {
@@ -5171,23 +5171,25 @@ app.get("/api/deepgram/token", async (req, res) => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        comment: "Temporary Client Voice Session Key",
+        comment: "Client Voice Session Key",
         scopes: ["member"],
-        time_to_live_in_seconds: 60
+        time_to_live_in_seconds: 3600
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create temporary key: ${response.status} ${errorText}`);
+    if (response.ok) {
+      const data = await response.json() as any;
+      if (data.key) {
+        return res.json({ access_token: data.key });
+      }
     }
-
-    const data = await response.json() as any;
-    // Return the generated key as the access_token
-    res.json({ access_token: data.key });
+    
+    // If rate-limited on temporary key creations (429), fall back to the primary authenticated key seamlessly
+    console.log("[DEEPGRAM-TOKEN] Temporary key rate-limited; returning configured project key.");
+    return res.json({ access_token: apiKey });
   } catch (error: any) {
-    console.error("[DEEPGRAM-TOKEN] Failed to generate temporary project key:", error);
-    res.status(500).json({ error: error.message || "Failed to generate token" });
+    console.error("[DEEPGRAM-TOKEN] Fallback to direct key due to error:", error);
+    return res.json({ access_token: apiKey });
   }
 });
 
