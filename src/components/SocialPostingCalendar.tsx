@@ -17,7 +17,8 @@ import {
   Clock, 
   MessageSquare,
   RefreshCw,
-  Send
+  Send,
+  Maximize2
 } from "lucide-react";
 
 export interface SocialPost {
@@ -54,6 +55,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
   // Image generation states
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
 
   const apiFetch = async (url: string, options: RequestInit = {}) => {
     const savedPassword = typeof window !== 'undefined' ? (localStorage.getItem("app_password") || "Big$$grl1986") : "Big$$grl1986";
@@ -738,15 +740,30 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                       className="w-full h-[70px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-none"
                     />
 
-                    <div className="relative h-[110px] rounded-lg overflow-hidden border border-teal-500/40 bg-black flex items-center justify-center">
+                    {/* Clickable Graphic Preview with Zoom Overlay */}
+                    <div 
+                      onClick={() => {
+                        const imgUrl = selectedPost.imageUrl || `https://image.pollinations.ai/prompt/${encodeURIComponent(selectedPost.imagePrompt || "B2B software workflow blueprint")}` + "?width=1200&height=800&nologo=true&private=true";
+                        setZoomImageUrl(imgUrl);
+                      }}
+                      className="relative h-[130px] rounded-lg overflow-hidden border border-teal-500/40 bg-black flex items-center justify-center cursor-pointer group hover:border-cyan-400 transition shadow-md"
+                      title="Click to expand high-resolution graphic"
+                    >
                       <img
                         src={selectedPost.imageUrl || `https://image.pollinations.ai/prompt/${encodeURIComponent(selectedPost.imagePrompt || "B2B software workflow blueprint")}` + "?width=500&height=300&nologo=true&private=true"}
                         alt="Visual preview"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                         loading="lazy"
                       />
-                      <div className="absolute bottom-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-[8px] font-mono text-teal-300">
-                        Generated Graphic
+                      
+                      {/* Hover Expand Badge */}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white font-mono text-[10px] font-bold">
+                        <Maximize2 size={13} className="text-cyan-400" />
+                        <span>Click to Expand</span>
+                      </div>
+
+                      <div className="absolute bottom-1 right-1 bg-black/70 px-1.5 py-0.5 rounded text-[8px] font-mono text-teal-300 pointer-events-none">
+                        🔍 Click to Zoom
                       </div>
                     </div>
                   </div>
@@ -857,6 +874,76 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* FULL-SCREEN IMAGE LIGHTBOX MODAL */}
+      {/* ========================================================================= */}
+      {zoomImageUrl && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-8 animate-fade-in"
+          onClick={() => setZoomImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-5xl w-full bg-[#022421] border-2 border-teal-400/80 rounded-2xl shadow-[0_0_80px_rgba(20,184,166,0.6)] overflow-hidden flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-3 bg-[#0d4a44] border-b border-teal-500/50 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-teal-200 font-mono text-xs font-bold uppercase tracking-wider">
+                <ImageIcon size={15} className="text-cyan-400" />
+                <span>High-Resolution Visual Preview</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={zoomImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 bg-teal-900 hover:bg-teal-800 text-teal-200 rounded text-[10px] font-mono font-bold flex items-center gap-1 border border-teal-500/40"
+                  download="social-graphic.png"
+                >
+                  <Download size={11} /> Download
+                </a>
+                <a
+                  href={zoomImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 bg-teal-900 hover:bg-teal-800 text-teal-200 rounded text-[10px] font-mono font-bold flex items-center gap-1 border border-teal-500/40"
+                >
+                  <ExternalLink size={11} /> Open Full Tab
+                </a>
+                <button
+                  onClick={() => setZoomImageUrl(null)}
+                  className="p-1 rounded text-teal-300 hover:text-rose-400 hover:bg-teal-900 transition cursor-pointer"
+                  type="button"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Expanded Image Container */}
+            <div className="p-4 bg-black/90 flex items-center justify-center overflow-auto flex-1 max-h-[75vh]">
+              <img
+                src={zoomImageUrl}
+                alt="Expanded graphic"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg border border-teal-500/30 shadow-2xl"
+              />
+            </div>
+
+            {/* Footer Tip */}
+            <div className="px-5 py-2.5 bg-[#04221f] border-t border-teal-500/40 flex items-center justify-between text-[10px] font-mono text-teal-300/80">
+              <span>💡 Generated specifically for your B2B thought leadership blueprint</span>
+              <button
+                onClick={() => setZoomImageUrl(null)}
+                className="px-3 py-1 bg-teal-700 hover:bg-teal-600 text-white rounded font-bold cursor-pointer transition"
+                type="button"
+              >
+                Close Preview (Esc)
+              </button>
+            </div>
           </div>
         </div>
       )}

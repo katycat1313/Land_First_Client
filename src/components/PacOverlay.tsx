@@ -3,7 +3,7 @@ import {
   Mic, MicOff, Volume2, VolumeX, Monitor, Send, Sparkles, Cpu,
   Terminal, Play, Square, Check, AlertCircle, X, ChevronRight,
   User, Bot, HelpCircle, CornerDownLeft, RefreshCw, Layers, Plus, Zap,
-  Trash2, Save, Calendar, Activity, Settings, Sliders, Copy
+  Trash2, Save, Calendar, Activity, Settings, Sliders, Copy, Maximize2, Download, ExternalLink, Image as ImageIcon
 } from "lucide-react";
 import { sendGmailEmail } from "../utils/gmailApi";
 import { Opportunity } from "../types";
@@ -261,10 +261,11 @@ export default function PacOverlay({
   const [generatingVideoPostId, setGeneratingVideoPostId] = useState<string | null>(null);
   const [generatedVideos, setGeneratedVideos] = useState<Record<string, string>>({});
   const [videoStatusMessages, setVideoStatusMessages] = useState<Record<string, string>>({});
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
 
   const handleGenerateRunwayVideo = async (post: any) => {
     setGeneratingVideoPostId(post.id);
-    setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Submitting task to Runway Gen-3 Alpha Turbo..." }));
+    setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Submitting task to Runway Gen-4 Turbo..." }));
     try {
       const prompt = post.videoScriptPrompt || post.content || "Dynamic B2B software workflow automation demo";
       const res = await apiFetch("/api/social-campaigns/generate-video", {
@@ -4010,20 +4011,34 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                             />
                           </div>
                           
-                          {/* Image rendering using Pollinations AI */}
-                          <div className="relative h-[110px] rounded-lg overflow-hidden border border-slate-850 bg-slate-950 flex items-center justify-center">
+                          {/* Image rendering using Pollinations AI with Zoom Click */}
+                          <div 
+                            onClick={() => {
+                              if (post.imagePrompt) {
+                                setZoomImageUrl(`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=1200&height=800&nologo=true&private=true`);
+                              }
+                            }}
+                            className="relative h-[110px] rounded-lg overflow-hidden border border-slate-850 bg-slate-950 flex items-center justify-center cursor-pointer group hover:border-cyan-400 transition"
+                            title="Click to expand high-resolution graphic"
+                          >
                             {post.imagePrompt ? (
-                              <img
-                                src={`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=400&height=250&nologo=true&private=true`}
-                                alt={post.platform}
-                                className="w-full h-full object-cover transition-opacity duration-300 hover:scale-105"
-                                loading="lazy"
-                              />
+                              <>
+                                <img
+                                  src={`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=400&height=250&nologo=true&private=true`}
+                                  alt={post.platform}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                                  loading="lazy"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white font-mono text-[9px] font-bold">
+                                  <Maximize2 size={12} className="text-cyan-400" />
+                                  <span>Expand</span>
+                                </div>
+                              </>
                             ) : (
                               <div className="text-[9px] text-slate-600 font-mono text-center">No image planned</div>
                             )}
-                            <div className="absolute bottom-1 right-1 bg-slate-900/80 px-1.5 py-0.5 rounded text-[8px] text-slate-400 font-mono border border-slate-800">
-                              Generated Asset
+                            <div className="absolute bottom-1 right-1 bg-slate-900/80 px-1.5 py-0.5 rounded text-[8px] text-slate-400 font-mono border border-slate-800 pointer-events-none">
+                              🔍 Zoom
                             </div>
                           </div>
 
@@ -4936,6 +4951,71 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
             </div>
           </div>
         </>
+      )}
+
+      {/* LIGHTBOX ZOOM MODAL FOR PAC CAMPAIGNS */}
+      {zoomImageUrl && (
+        <div 
+          className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-8 animate-fade-in"
+          onClick={() => setZoomImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-5xl w-full bg-[#022421] border-2 border-teal-400/80 rounded-2xl shadow-[0_0_80px_rgba(20,184,166,0.6)] overflow-hidden flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3 bg-[#0d4a44] border-b border-teal-500/50 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-teal-200 font-mono text-xs font-bold uppercase tracking-wider">
+                <ImageIcon size={15} className="text-cyan-400" />
+                <span>High-Resolution Visual Preview</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={zoomImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 bg-teal-900 hover:bg-teal-800 text-teal-200 rounded text-[10px] font-mono font-bold flex items-center gap-1 border border-teal-500/40"
+                  download="social-graphic.png"
+                >
+                  <Download size={11} /> Download
+                </a>
+                <a
+                  href={zoomImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 bg-teal-900 hover:bg-teal-800 text-teal-200 rounded text-[10px] font-mono font-bold flex items-center gap-1 border border-teal-500/40"
+                >
+                  <ExternalLink size={11} /> Open Full Tab
+                </a>
+                <button
+                  onClick={() => setZoomImageUrl(null)}
+                  className="p-1 rounded text-teal-300 hover:text-rose-400 hover:bg-teal-900 transition cursor-pointer"
+                  type="button"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 bg-black/90 flex items-center justify-center overflow-auto flex-1 max-h-[75vh]">
+              <img
+                src={zoomImageUrl}
+                alt="Expanded graphic"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg border border-teal-500/30 shadow-2xl"
+              />
+            </div>
+
+            <div className="px-5 py-2.5 bg-[#04221f] border-t border-teal-500/40 flex items-center justify-between text-[10px] font-mono text-teal-300/80">
+              <span>💡 High-Resolution Thought Leadership Infographic</span>
+              <button
+                onClick={() => setZoomImageUrl(null)}
+                className="px-3 py-1 bg-teal-700 hover:bg-teal-600 text-white rounded font-bold cursor-pointer transition"
+                type="button"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
