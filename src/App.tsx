@@ -1068,17 +1068,16 @@ export default function App() {
             <span className="text-[#a5eee2] font-bold uppercase">Online</span>
           </div>
 
-          {/* G14 / Mac Ollama Local Qwen2.5 Tunnel Button */}
-          <button
-            onClick={() => setIsOllamaModalOpen(true)}
-            className="px-3 py-1 bg-gradient-to-r from-[#082a72] to-[#0a3a92] hover:from-[#0a3a92] hover:to-[#0c48b8] active:bg-[#061f55] border border-cyan-400/40 rounded flex items-center gap-2 text-teal-100 hover:text-white transition cursor-pointer shadow-sm group"
-            title="Configure G14 / Mac Ollama Qwen2.5 Local LLM Tunnel"
+          {/* Cloud Frontier AI Engine Badge */}
+          <div
+            className="px-3 py-1 bg-gradient-to-r from-teal-950/80 to-cyan-950/80 border border-teal-500/40 rounded flex items-center gap-2 text-teal-100 shadow-sm"
+            title="Frontier Cloud AI: Google Gemini 2.5 Flash / Pro & OpenAI GPT-4o Active"
           >
-            <Cpu size={13} className="text-cyan-300 group-hover:rotate-45 transition-transform" />
+            <Sparkles size={13} className="text-cyan-300 animate-pulse" />
             <span>LLM:</span>
-            <span className="text-cyan-200 font-bold font-mono">Ollama Qwen2.5</span>
+            <span className="text-teal-200 font-bold font-mono">Gemini 2.5 Pro / GPT-4o</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
-          </button>
+          </div>
           
           {/* Gmail Connection Status */}
           {gmailUser ? (
