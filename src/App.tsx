@@ -1168,8 +1168,8 @@ export default function App() {
           <span className="text-2xl font-bold font-mono text-[#a5eee2] mt-1">{stats.totalDiscovered}</span>
         </div>
         <div className="p-4 flex flex-col justify-between" id="stat-saved">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Saved Leads</span>
-          <span className="text-2xl font-bold font-mono text-[#3b82f6] mt-1">{stats.saved}</span>
+          <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Leads on Board</span>
+          <span className="text-2xl font-bold font-mono text-cyan-300 mt-1">{opportunities.length}</span>
         </div>
         <div className="p-4 flex flex-col justify-between" id="stat-contacted">
           <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Outreaches Sent</span>
