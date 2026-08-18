@@ -55,11 +55,20 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
   // Image generation states
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const savedPassword = typeof window !== 'undefined' ? (localStorage.getItem("app_password") || "Big$$grl1986") : "Big$$grl1986";
+    const headers = new Headers(options.headers || {});
+    if (savedPassword) {
+      headers.set("x-app-password", savedPassword);
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   // Fetch social campaigns/posts from backend
   const fetchPosts = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch("/api/social-campaigns");
+      const res = await apiFetch("/api/social-campaigns");
       if (res.ok) {
         const data = await res.json();
         setPosts(data || []);
@@ -104,7 +113,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
   const handlePlan7DayCampaign = async () => {
     setIsGeneratingCampaign(true);
     try {
-      const res = await fetch("/api/social-campaigns/generate", {
+      const res = await apiFetch("/api/social-campaigns/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
@@ -212,7 +221,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
     // Save to backend
     try {
-      await fetch("/api/social-campaigns/approve", {
+      await apiFetch("/api/social-campaigns/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: selectedPost.id, updatedPost: selectedPost })
@@ -254,15 +263,15 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     alert(`📋 Post content copied to clipboard!\n\nOpened ${post.platform} scheduler in a new tab. Paste (⌘+V / Ctrl+V) and set schedule for ${post.scheduledDate}.`);
   };
 
-  // Render Runway Gen-3 Video Clip
+  // Render Runway Gen-4 Video Clip
   const handleRenderRunwayVideo = async () => {
     if (!selectedPost) return;
     setIsRenderingVideo(true);
-    setVideoStatusMsg("Submitting task to Runway Gen-3 Alpha Turbo...");
+    setVideoStatusMsg("Submitting task to Runway Gen-4 Turbo...");
 
     try {
       const promptText = selectedPost.videoScriptPrompt || selectedPost.content || "B2B software workflow demo";
-      const res = await fetch("/api/social-campaigns/generate-video", {
+      const res = await apiFetch("/api/social-campaigns/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -282,7 +291,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
       const interval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`/api/social-campaigns/video-status/${taskId}`);
+          const statusRes = await apiFetch(`/api/social-campaigns/video-status/${taskId}`);
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             if (statusData.status === "SUCCEEDED" && statusData.videoUrl) {
@@ -313,7 +322,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     setIsGeneratingImage(true);
 
     try {
-      const res = await fetch("/api/social-campaigns/generate-image", {
+      const res = await apiFetch("/api/social-campaigns/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: selectedPost.imagePrompt })
