@@ -16,6 +16,7 @@ import {
   getFallbackSolutionOptions,
   apiCache
 } from "./server/db";
+import { GIVEAWAY_BLUEPRINTS, formatGiveawayBlueprintsForPrompt, selectGiveawayBlueprints } from "./server/giveawayBlueprints";
 
 import {
   generateUnifiedLLM,
@@ -68,7 +69,9 @@ function getStripeClient(): Stripe | null {
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
-app.use(express.json());
+// Generated campaign images are sent back as compressed data URLs when they
+// become Runway reference frames. Keep this bounded, but above Express's 100 KB default.
+app.use(express.json({ limit: "10mb" }));
 
 let lastUserActivityTimestamp = Date.now();
 
@@ -1160,6 +1163,10 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
   }
 
   try {
+    const matchedBlueprints = selectGiveawayBlueprints(opportunity);
+    const matchedBlueprintText = matchedBlueprints.length > 0
+      ? matchedBlueprints.map(blueprint => formatGiveawayBlueprintsForPrompt().split("\n\n").find(item => item.includes(`BLUEPRINT ID: ${blueprint.id}`))).filter(Boolean).join("\n\n")
+      : "NO SAFE BLUEPRINT MATCHED. Do not include or invent an automation giveaway.";
     const prompt = `
       You are an expert, highly empathetic solo AI and software developer who connects with potential customers by being helpful first. You NEVER generate generic spam, promotional ads, or "hire me" pitches. Your goal is to establish trust, provide high-value technical or process feedback, and start a meaningful 2-way conversation about their exact problem.
 
@@ -1175,11 +1182,22 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
       User Feedback/Guidance to apply to this draft:
       ${userGuidance ? `"${userGuidance}"` : "None (provide a naturally helpful, professional, conversational outreach)"}
 
+      PRE-SCREENED GIVEAWAY OPTIONS:
+      ${matchedBlueprintText}
+
+      GIVEAWAY SAFETY RULES:
+      - Use at most one blueprint, and only if its evidence requirements are explicitly supported above.
+      - If no blueprint matched, set selectedBlueprintId to null and do not invent one.
+      - Give every listed setup step and the success check. Never omit a step to create dependency.
+      - The setup must remain optional, reversible, no-code, and free with tools they already use.
+      - Never suggest a giveaway that sends bulk messages, deletes or moves data, handles sensitive information, changes billing, or requires credentials.
+      - Mention the larger custom work only as a separate optional possibility, never as a requirement to finish the free fix.
+
       Task:
       Generate three structured sections in JSON:
       1. "responseDraft": A highly targeted outreach message written in a down-to-earth, natural, conversational tone (NO AI buzzwords like 'game-changer', 'leverage', 'seamless', 'revolutionize').
          - IF THE LEAD IS A MARKETING / WEB AGENCY: Pitch as a discrete, reliable white-label development & automation partner. Emphasize that they can sell custom CRM, API, and automation solutions to their clients under their own brand for high margins while we handle 100% of the build in 48-72 hours with zero dev payroll overhead. Offer a free 5-minute technical review or architecture blueprint of their client's integration to help them close the deal.
-         - IF THE LEAD IS A DIRECT CONTRACTOR / OPERATOR (HVAC, Real Estate, Local Business): Address their direct workflow headache (missed leads, manual spreadsheets, scheduling delays). Proactively offer a specific, free, copy-pasteable solution template or formula, and ask a single friendly open-ended question.
+         - IF THE LEAD IS A DIRECT CONTRACTOR / OPERATOR: Address the verified workflow headache. Include a giveaway only when one appears in PRE-SCREENED GIVEAWAY OPTIONS.
          - NO hard selling, NO aggressive closing. Keep it casual, helpful, and peer-to-peer.
       2. "suggestedQuestions": An array of 2-3 deep-dive technical/process questions to ask to understand their problem better.
       3. "valueAdditionIdeas": An array of 2-3 free things you can do to immediately build goodwill (e.g., "Build a sample webhook blueprint", "Review client API docs", "Send a copy-pasteable script").
@@ -1187,6 +1205,7 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
       Return raw JSON matching this structure:
       {
         "responseDraft": "string",
+        "selectedBlueprintId": "one listed blueprint ID or null",
         "suggestedQuestions": ["string"],
         "valueAdditionIdeas": ["string"]
       }
@@ -1203,6 +1222,11 @@ app.post("/api/opportunities/draft-response", async (req, res) => {
     console.error("Error generating response draft:", error);
     res.status(500).json({ error: error.message || "Failed to generate response draft." });
   }
+});
+
+// GET /api/giveaway-blueprints - Review the exact safe, complete fixes P.A.C. may offer.
+app.get("/api/giveaway-blueprints", (_req, res) => {
+  res.json(GIVEAWAY_BLUEPRINTS);
 });
 
 // 6. Analyze custom pasted text (manual discovery)
@@ -4120,6 +4144,12 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
         "content": "Full post text with scroll-stopping hook, practical step-by-step value, and natural soft CTA...",
         "imagePrompt": "Detailed prompt for generating a clean, modern, minimalist B2B workflow infographic, architecture diagram, or UI dashboard graphic...",
         "videoScriptPrompt": "30-second casual Loom / Reel walkthrough script outline...",
+        "videoBlocks": [
+          { "prompt": "Opening hook shot with one clear action and camera direction", "duration": 5 },
+          { "prompt": "Demonstration shot that visually proves the practical solution", "duration": 5 },
+          { "prompt": "Clean result shot that resolves the opening problem", "duration": 5 }
+        ],
+        "audioPrompt": "Specific five-second ambient sound design with no copyrighted music, no narration, and no brand sounds...",
         "status": "Pending Approval"
       }]
     `;
@@ -4134,8 +4164,30 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
 
     const parsed = safeParseJSON(rawResult || "[]");
     if (Array.isArray(parsed) && parsed.length > 0) {
-      saveSocialCampaigns(parsed);
-      return res.json({ success: true, posts: parsed });
+      const openaiKey = process.env.OPENAI_API_KEY;
+      let updatedPosts = parsed;
+      if (openaiKey) {
+        console.log(`[Social Campaigns] Pre-generating recognizable campaign visuals...`);
+        updatedPosts = await Promise.all(
+          parsed.map(async (post: any) => {
+            if (post.imagePrompt) {
+              try {
+                const imageUrl = await generateSocialCampaignImage(post.imagePrompt, "medium");
+                return { ...post, imageUrl };
+              } catch (imgErr) {
+                console.error(`[Social Campaigns] Failed to pre-generate image for post ${post.id}:`, imgErr);
+              }
+            }
+            return { ...post, imageUrl: "" };
+          })
+        );
+      } else {
+        // Keep the authored prompt, but never pretend a low-quality third-party
+        // placeholder is the final campaign asset.
+        updatedPosts = parsed.map((post: any) => ({ ...post, imageUrl: "" }));
+      }
+      saveSocialCampaigns(updatedPosts);
+      return res.json({ success: true, posts: updatedPosts });
     }
     throw new Error("Invalid or empty response format from LLM.");
   } catch (err: any) {
@@ -4221,37 +4273,77 @@ app.post("/api/social-campaigns/reject", async (req, res) => {
   }
 });
 
+type SocialImageQuality = "medium" | "high";
+
+const buildSocialImagePrompt = (prompt: string) => `
+Use case: ads-marketing
+Asset type: landscape social-media campaign visual
+Primary request: ${prompt.trim()}
+Composition/framing: one immediately recognizable main subject; simple left-to-right visual hierarchy; generous spacing; landscape 3:2 composition; no tiny details
+Style/medium: polished editorial illustration or crisp product-style visualization, grounded in believable real-world objects and environments
+Lighting/mood: clean natural contrast, confident and practical
+Constraints: the main subject must be clear at thumbnail size; every object must have coherent anatomy, geometry, perspective, and edges; use at most three supporting elements
+Avoid: illegible text, fake UI copy, logos, watermarks, clutter, surreal objects, distorted hands, duplicated objects, abstract glowing shapes, generic stock-art collage
+`.trim();
+
+const generateSocialCampaignImage = async (
+  prompt: string,
+  quality: SocialImageQuality = "high"
+): Promise<string> => {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    throw new Error("OPENAI_API_KEY is not configured; no image was generated.");
+  }
+
+  const response = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${openaiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+      prompt: buildSocialImagePrompt(prompt),
+      n: 1,
+      size: "1536x1024",
+      quality,
+      output_format: "jpeg",
+      output_compression: 88
+    })
+  });
+
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`OpenAI image generation failed (${response.status}): ${body.slice(0, 500)}`);
+  }
+
+  const json: any = JSON.parse(body);
+  const image = json.data?.[0];
+  if (image?.b64_json) return `data:image/jpeg;base64,${image.b64_json}`;
+  if (image?.url) return image.url;
+  throw new Error("OpenAI returned no generated image data.");
+};
+
+const buildRunwayMotionPrompt = (creativeDirection: string) => `
+Animate the supplied reference image as one continuous five-second shot.
+Preserve exactly: the main subject, object count, shapes, proportions, colors, composition, background, and all visible lettering.
+Motion: subtle natural environmental movement and a slow, stable camera push-in with gentle parallax.
+Creative direction: ${creativeDirection.trim()}
+Do not add a new scene or new objects. No cuts, morphing, melting, duplication, warped geometry, altered logos, rewritten text, or newly generated text. Keep the subject recognizable in every frame.
+`.trim();
+
+const waitForRetry = (milliseconds: number) =>
+  new Promise(resolve => setTimeout(resolve, milliseconds));
+
 // POST /api/social-campaigns/generate-image
 app.post("/api/social-campaigns/generate-image", async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Prompt is required." });
 
   try {
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
-      console.log(`[Campaigns Image] Generating high-res visual via OpenAI DALL-E 3...`);
-      const response = await fetch("https://api.openai.com/v1/images/generations", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openaiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "dall-e-3",
-          prompt: `Clean, modern, minimalist B2B infographic or diagram: ${prompt}`,
-          n: 1,
-          size: "1024x1024"
-        })
-      });
-      if (response.ok) {
-        const json: any = await response.json();
-        if (json.data && json.data[0]?.url) {
-          return res.json({ success: true, imageUrl: json.data[0].url });
-        }
-      }
-    }
-    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=800&height=500&nologo=true&private=true`;
-    res.json({ success: true, imageUrl: fallbackUrl });
+    console.log(`[Campaigns Image] Generating a high-quality landscape visual...`);
+    const imageUrl = await generateSocialCampaignImage(prompt, "high");
+    res.json({ success: true, imageUrl });
   } catch (err: any) {
     console.error("[Campaigns Image Generation Error]:", err);
     res.status(500).json({ error: err.message });
@@ -4260,7 +4352,7 @@ app.post("/api/social-campaigns/generate-image", async (req, res) => {
 
 // POST /api/social-campaigns/generate-video
 app.post("/api/social-campaigns/generate-video", async (req, res) => {
-  const { promptText, referenceImageUrl, duration = 5, ratio = "1280:720" } = req.body;
+  const { promptText, referenceImageUrl, duration = 15, ratio = "1920:1080", blocks } = req.body;
   if (!promptText && !referenceImageUrl) {
     return res.status(400).json({ error: "Prompt or reference image is required." });
   }
@@ -4271,58 +4363,150 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
   }
 
   try {
-    console.log(`[Runway Video] Submitting Gen-3 Alpha Turbo video task (Duration: ${duration}s, Ratio: ${ratio})...`);
-    const endpoint = "https://api.dev.runwayml.com/v1/image_to_video";
+    console.log(`[Runway Video] Planning a purpose-built multi-shot video...`);
+    const endpoint = "https://api.dev.runwayml.com/v1/recipes/multi_shot_video";
 
     let finalPromptImage = referenceImageUrl;
     if (!finalPromptImage) {
-      const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(promptText || "business software automation dashboard")}` + "?width=1280&height=768&nologo=true";
       try {
-        const imgRes = await fetch(fallbackUrl);
-        if (imgRes.ok) {
-          const arrBuffer = await imgRes.arrayBuffer();
-          const base64Str = Buffer.from(arrBuffer).toString("base64");
-          const contentType = imgRes.headers.get("content-type") || "image/jpeg";
-          finalPromptImage = `data:${contentType};base64,${base64Str}`;
-        }
+        finalPromptImage = await generateSocialCampaignImage(
+          promptText || "A clear business workflow automation scene",
+          "high"
+        );
       } catch (e) {
-        console.error("Failed to convert image to base64:", e);
+        console.error("Failed to generate a video reference image:", e);
       }
     }
 
     if (!finalPromptImage) {
-      finalPromptImage = "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1280&q=80";
+      return res.status(422).json({
+        error: "A recognizable reference image could not be generated. Generate or attach the campaign image first."
+      });
     }
 
-    const validRatio = ratio === "720:1280" || ratio === "9:16" ? "720:1280" : "1280:720";
+    const validRatio = ratio === "720:1280" || ratio === "1080:1920" || ratio === "9:16"
+      ? "1080:1920"
+      : "1920:1080";
+
+    const requestedBlocks = Array.isArray(blocks) ? blocks : [];
+    let plannedBlocks = requestedBlocks
+      .filter((block: any) => typeof block?.prompt === "string" && block.prompt.trim())
+      .slice(0, 5)
+      .map((block: any) => ({
+        prompt: block.prompt.trim().slice(0, 512),
+        duration: Math.max(2, Math.min(Number(block.duration) || 5, 8))
+      }));
+
+    if (plannedBlocks.length < 3) {
+      const rawPlan = await generateUnifiedLLM({
+        systemPrompt: `You are a meticulous commercial video director. Break one social-media idea into exactly three coherent five-second shots. The shots must serve the post's purpose, share the same subject and visual identity, and progress from hook to proof to result. Describe only visible action, camera movement, lighting, and continuity. Never invent testimonials, performance figures, customers, or product claims. Return strict JSON only.`,
+        prompt: `Create three production blocks for this video brief:\n${promptText || "A practical business workflow demonstration"}\n\nReturn: {"blocks":[{"prompt":"...","duration":5},{"prompt":"...","duration":5},{"prompt":"...","duration":5}]}`,
+        responseJson: true,
+        temperature: 0.35
+      });
+      const parsedPlan = safeParseJSON(rawPlan || "{}");
+      plannedBlocks = Array.isArray(parsedPlan?.blocks) ? parsedPlan.blocks.slice(0, 3) : [];
+    }
+
+    if (plannedBlocks.length < 3) {
+      return res.status(422).json({ error: "A professional video requires at least three valid scene blocks." });
+    }
+
+    // Runway custom multi-shot currently supports finished 5, 10, or 15 second videos.
+    // Normalize three director-approved blocks to a cohesive 15-second master.
+    plannedBlocks = plannedBlocks.slice(0, 3).map((block: any, index: number) => ({
+      prompt: `${buildRunwayMotionPrompt(String(block.prompt || promptText)).slice(0, 340)} Continuity: this is ${index === 0 ? "the opening hook" : index === 1 ? "the proof shot" : "the resolving result shot"}; preserve the same subject, palette, lighting family, and visual world across all shots.`.slice(0, 512),
+      duration: 5
+    }));
 
     const payload: any = {
-      model: "gen4_turbo",
-      promptImage: finalPromptImage,
-      promptText: promptText || "Dynamic software automation walkthrough",
-      duration: duration === 10 ? 10 : 5,
-      ratio: validRatio
+      version: "unsafe-latest",
+      mode: "custom",
+      shots: plannedBlocks,
+      firstFrame: { uri: finalPromptImage },
+      duration: 15,
+      ratio: validRatio,
+      audio: true
     };
 
-    const response = await fetch(endpoint, {
+    const idempotencyKey = crypto.randomUUID();
+    let response: Response | null = null;
+    let body = "";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${runwayKey}`,
+          "X-Runway-Version": "2024-11-06",
+          "Idempotency-Key": idempotencyKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      body = await response.text();
+      if (response.ok) break;
+      if (response.status !== 429 && response.status < 500) break;
+      const retryAfterSeconds = Number(response.headers.get("retry-after")) || Math.pow(2, attempt + 1);
+      await waitForRetry(Math.min(retryAfterSeconds * 1000, 15000));
+    }
+
+    if (!response?.ok) {
+      throw new Error(`Runway error (${response?.status || "network"}): ${body}`);
+    }
+
+    const json = JSON.parse(body);
+    res.json({
+      success: true,
+      taskId: json.id,
+      status: json.status || "PENDING",
+      integratedAudio: true,
+      blocks: plannedBlocks,
+      modelPolicy: "runway-multi-shot:unsafe-latest"
+    });
+  } catch (err: any) {
+    console.error("[Runway Video Error]:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/social-campaigns/generate-sound
+app.post("/api/social-campaigns/generate-sound", async (req, res) => {
+  const { promptText, duration = 5 } = req.body;
+  if (!promptText?.trim()) {
+    return res.status(400).json({ error: "A sound description is required." });
+  }
+
+  const runwayKey = process.env.RUNWAY_API_KEY;
+  if (!runwayKey) {
+    return res.status(400).json({ error: "RUNWAY_API_KEY is not configured in .env." });
+  }
+
+  try {
+    const response = await fetch("https://api.dev.runwayml.com/v1/sound_effect", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${runwayKey}`,
         "X-Runway-Version": "2024-11-06",
+        "Idempotency-Key": crypto.randomUUID(),
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        model: process.env.RUNWAY_AUDIO_MODEL || "seed_audio",
+        promptText: `Natural sound design for a professional social video. ${promptText.trim()} No speech, no copyrighted melody, no brand-identifying sounds.`,
+        duration: Math.max(2, Math.min(Number(duration) || 5, 10)),
+        loop: false,
+        outputFormat: "mp3"
+      })
     });
 
     const body = await response.text();
     if (!response.ok) {
-      throw new Error(`Runway error (${response.status}): ${body}`);
+      throw new Error(`Runway sound error (${response.status}): ${body}`);
     }
-
     const json = JSON.parse(body);
     res.json({ success: true, taskId: json.id, status: json.status || "PENDING" });
   } catch (err: any) {
-    console.error("[Runway Video Error]:", err);
+    console.error("[Runway Sound Error]:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -4722,6 +4906,17 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
    - ZERO AI buzzwords or corporate jargon (strictly BANNED: "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "testament").
    - 100% focused on rapport, empathy, diagnostic questions, and upfront problem solving—never pushy selling or premature deposit demands.
 
+[SAFE GIVEAWAY BLUEPRINT RULES]
+- Offer at most one giveaway and only when authentic evidence explicitly matches every evidence requirement.
+- If the match is uncertain, offer ordinary advice or ask a question. Do not send a blueprint.
+- Include every setup step and success check. Never omit steps or create dependency on us.
+- The free fix must remain optional, reversible, no-code, and usable in 15 minutes or less with tools the prospect already uses.
+- Never use giveaways involving bulk sends, automatic sales replies, deletion, moved data, credentials, billing, or sensitive information.
+- Larger paid work must solve a separate problem and is optional. Never imply it is needed to complete or repair the free fix.
+
+[APPROVED GIVEAWAY BLUEPRINT LIBRARY]
+${formatGiveawayBlueprintsForPrompt()}
+
 [OUTREACH & MESSAGING DELIVERY TRUTH]
 - Reddit, LinkedIn, Twitter, and forum DMs are dispatched safely via browser deep-linking, NOT by invisible background bots pretending to be the user.
 - When you draft outreach, tell your partner: "I've drafted the message and loaded it into your Review tab. When you click Log, Approve & Launch, it copies the message to your clipboard, marks them Contacted in your CRM, and opens Reddit directly in your browser so you can review and hit send."
@@ -4733,6 +4928,7 @@ You possess deep, up-to-date expertise in our specific technical arsenal so you 
 - Deploying autonomous, multi-agent systems via OpenClaw with full execution capabilities enabled (including real-time web search, browser & screen computer use, web scraping, n8n webhook triggers, code execution, and Gmail/API integrations to complete all assigned tasks autonomously).
 - Engineering custom, voice-driven AI receptionist workflows using Vapi AI.
 - Leveraging active professional certifications (Google Analytics, Conversion Optimization, AI-Powered Shopping Ads) to ensure our tools drive measurable growth.
+- Managing our built-in Social Calendar & Posting Hub (accessible via [ACTION: NAVIGATE: social-posting]), which allows creating a 7-day thought leadership campaign, designing social graphics via DALL-E/Imagen, rendering Runway AI videos, exporting schedule (.ics files) to Google/Apple Calendar, and launching direct social posting links.
 
 [CORE DIRECTIVES]
 1. Down-To-Earth Human Tone (Zero AI Buzzwords): Write all outreach messages, replies, and thought leadership posts in a warm, relaxed, authentic human voice—exactly how a real founder speaks off the cuff.
@@ -4808,6 +5004,7 @@ Available Action Tags:
    - [ACTION: NAVIGATE: bots] -> Switches main screen to Crawler Fleet Config & Run Logs
    - [ACTION: NAVIGATE: partner] -> Switches main screen to AI Strategy Partner Space
    - [ACTION: NAVIGATE: learning] -> Switches main screen to Self-Learning Engine
+   - [ACTION: NAVIGATE: social-posting] -> Switches main screen to Social Calendar & Posting Hub
 
 2. Pull Up Specific Problem / Opportunity Card:
    - [ACTION: OPEN_OPPORTUNITY: <id_or_keyword>] -> Automatically pulls up and opens the Opportunity Detail Drawer on screen for the specified opportunity ID or keyword! (e.g., [ACTION: OPEN_OPPORTUNITY: HVAC] or [ACTION: OPEN_OPPORTUNITY: discovered-reddit-1786745552943]).

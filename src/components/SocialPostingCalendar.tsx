@@ -30,7 +30,10 @@ export interface SocialPost {
   imagePrompt?: string;
   imageUrl?: string;
   videoScriptPrompt?: string;
+  videoBlocks?: Array<{ prompt: string; duration: number }>;
   videoUrl?: string;
+  audioPrompt?: string;
+  audioUrl?: string;
   status: "Draft" | "Pending Approval" | "Approved" | "Published" | "Rejected";
   notes?: string;
 }
@@ -265,11 +268,11 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     alert(`📋 Post content copied to clipboard!\n\nOpened ${post.platform} scheduler in a new tab. Paste (⌘+V / Ctrl+V) and set schedule for ${post.scheduledDate}.`);
   };
 
-  // Render Runway Gen-4 Video Clip
+  // Render a purpose-built Runway multi-shot master
   const handleRenderRunwayVideo = async () => {
     if (!selectedPost) return;
     setIsRenderingVideo(true);
-    setVideoStatusMsg("Submitting task to Runway Gen-4 Turbo...");
+    setVideoStatusMsg("Submitting a quality-first multi-shot production to Runway...");
 
     try {
       const promptText = selectedPost.videoScriptPrompt || selectedPost.content || "B2B software workflow demo";
@@ -278,8 +281,10 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           promptText: promptText.substring(0, 500),
-          duration: 5,
-          ratio: "1280:720"
+          referenceImageUrl: selectedPost.imageUrl || undefined,
+          blocks: selectedPost.videoBlocks,
+          duration: 15,
+          ratio: "1920:1080"
         })
       });
 
@@ -289,7 +294,9 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
       }
 
       const taskId = data.taskId;
-      setVideoStatusMsg("Rendering 5-second video in Runway (approx 30-45s)...");
+      setVideoStatusMsg("Rendering a 15-second multi-shot video with integrated sound...");
+
+      const soundTaskId = data.integratedAudio ? null : undefined;
 
       const interval = setInterval(async () => {
         try {
@@ -312,13 +319,30 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
           }
         } catch (e) {}
       }, 5000);
+
+      if (soundTaskId) {
+        const soundInterval = setInterval(async () => {
+          try {
+            const statusRes = await apiFetch(`/api/social-campaigns/video-status/${soundTaskId}`);
+            if (!statusRes.ok) return;
+            const statusData = await statusRes.json();
+            if (statusData.status === "SUCCEEDED" && statusData.videoUrl) {
+              clearInterval(soundInterval);
+              setSelectedPost(prev => prev ? { ...prev, audioUrl: statusData.videoUrl } : null);
+              setPosts(prev => prev.map(p => p.id === selectedPost.id ? { ...p, audioUrl: statusData.videoUrl } : p));
+            } else if (statusData.status === "FAILED") {
+              clearInterval(soundInterval);
+            }
+          } catch (e) {}
+        }, 5000);
+      }
     } catch (err: any) {
       setIsRenderingVideo(false);
       setVideoStatusMsg(`❌ Error: ${err.message}`);
     }
   };
 
-  // Regenerate Image via OpenAI DALL-E 3 / Google Imagen
+  // Regenerate the high-quality visual anchor
   const handleRegenerateImage = async () => {
     if (!selectedPost || !selectedPost.imagePrompt) return;
     setIsGeneratingImage(true);
@@ -330,15 +354,17 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
         body: JSON.stringify({ prompt: selectedPost.imagePrompt })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.imageUrl) {
-          setSelectedPost(prev => prev ? { ...prev, imageUrl: data.imageUrl } : null);
-          setPosts(prev => prev.map(p => p.id === selectedPost.id ? { ...p, imageUrl: data.imageUrl } : p));
-        }
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Image generation failed");
       }
-    } catch (e) {
+      if (data.imageUrl) {
+        setSelectedPost(prev => prev ? { ...prev, imageUrl: data.imageUrl } : null);
+        setPosts(prev => prev.map(p => p.id === selectedPost.id ? { ...p, imageUrl: data.imageUrl } : p));
+      }
+    } catch (e: any) {
       console.error(e);
+      alert(`Image generation failed: ${e.message}`);
     } finally {
       setIsGeneratingImage(false);
     }
@@ -742,15 +768,12 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
                     {/* Clickable Graphic Preview with Zoom Overlay */}
                     <div 
-                      onClick={() => {
-                        const imgUrl = selectedPost.imageUrl || `https://image.pollinations.ai/prompt/${encodeURIComponent(selectedPost.imagePrompt || "B2B software workflow blueprint")}` + "?width=1200&height=800&nologo=true&private=true";
-                        setZoomImageUrl(imgUrl);
-                      }}
+                      onClick={() => selectedPost.imageUrl && setZoomImageUrl(selectedPost.imageUrl)}
                       className="relative h-[130px] rounded-lg overflow-hidden border border-teal-500/40 bg-black flex items-center justify-center cursor-pointer group hover:border-cyan-400 transition shadow-md"
                       title="Click to expand high-resolution graphic"
                     >
                       <img
-                        src={selectedPost.imageUrl || `https://image.pollinations.ai/prompt/${encodeURIComponent(selectedPost.imagePrompt || "B2B software workflow blueprint")}` + "?width=500&height=300&nologo=true&private=true"}
+                        src={selectedPost.imageUrl || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='600'%3E%3Crect width='100%25' height='100%25' fill='%230f2928'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dominant-baseline='middle' fill='%235eead4' font-family='sans-serif' font-size='24'%3EGenerate image to preview%3C/text%3E%3C/svg%3E"}
                         alt="Visual preview"
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                         loading="lazy"
@@ -770,14 +793,20 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
                   {/* Video Script & Runway AI Video Generator */}
                   <div className="space-y-2">
-                    <label className="text-[9px] font-mono uppercase text-teal-300 block">
-                      30-Sec Video Script / Loom Outline
-                    </label>
+                    <label className="text-[9px] font-mono uppercase text-teal-300 block">15-Sec Video Direction</label>
                     <textarea
                       value={selectedPost.videoScriptPrompt || ""}
                       onChange={(e) => setSelectedPost({ ...selectedPost, videoScriptPrompt: e.target.value })}
-                      placeholder="Outline for quick 30-sec demo..."
+                      placeholder="Hook, proof, and result for a concise professional video..."
                       className="w-full h-[70px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-none"
+                    />
+
+                    <label className="text-[9px] font-mono uppercase text-teal-300 block">Sound Direction</label>
+                    <textarea
+                      value={selectedPost.audioPrompt || ""}
+                      onChange={(e) => setSelectedPost({ ...selectedPost, audioPrompt: e.target.value })}
+                      placeholder="Example: quiet office ambience, one notification chime, soft keyboard taps..."
+                      className="w-full h-[55px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-none"
                     />
 
                     <div className="space-y-1.5">
@@ -795,7 +824,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                         ) : (
                           <>
                             <Video size={12} />
-                            <span>🎬 Render Runway AI Video (5s)</span>
+                            <span>🎬 Render Professional Video + Sound (15s)</span>
                           </>
                         )}
                       </button>
@@ -811,11 +840,15 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                           <video
                             src={selectedPost.videoUrl}
                             controls
-                            autoPlay
                             loop
-                            muted
                             className="w-full max-h-[110px] object-cover"
                           />
+                        </div>
+                      )}
+                      {selectedPost.audioUrl && (
+                        <div className="rounded-lg border border-cyan-500/40 bg-slate-950 p-2">
+                          <div className="mb-1 text-[8px] font-mono uppercase text-cyan-300">Generated sound track</div>
+                          <audio src={selectedPost.audioUrl} controls className="h-8 w-full" />
                         </div>
                       )}
                     </div>

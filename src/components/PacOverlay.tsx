@@ -14,7 +14,7 @@ interface PacOverlayProps {
   gmailUser: any;
   onRefreshOpportunities?: () => void;
   activeView?: string;
-  onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning') => void;
+  onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting') => void;
   onSelectOpportunity?: (opp: Opportunity | null) => void;
 }
 
@@ -260,12 +260,13 @@ export default function PacOverlay({
 
   const [generatingVideoPostId, setGeneratingVideoPostId] = useState<string | null>(null);
   const [generatedVideos, setGeneratedVideos] = useState<Record<string, string>>({});
+  const [giveawayBlueprints, setGiveawayBlueprints] = useState<any[]>([]);
   const [videoStatusMessages, setVideoStatusMessages] = useState<Record<string, string>>({});
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
 
   const handleGenerateRunwayVideo = async (post: any) => {
     setGeneratingVideoPostId(post.id);
-    setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Submitting task to Runway Gen-4 Turbo..." }));
+    setVideoStatusMessages(prev => ({ ...prev, [post.id]: "Submitting a professional multi-shot production to Runway..." }));
     try {
       const prompt = post.videoScriptPrompt || post.content || "Dynamic B2B software workflow automation demo";
       const res = await apiFetch("/api/social-campaigns/generate-video", {
@@ -273,8 +274,10 @@ export default function PacOverlay({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           promptText: prompt.substring(0, 500),
-          duration: 5,
-          ratio: "1280:720"
+          referenceImageUrl: post.imageUrl || undefined,
+          blocks: post.videoBlocks,
+          duration: 15,
+          ratio: "1920:1080"
         })
       });
       const data = await res.json();
@@ -577,6 +580,18 @@ export default function PacOverlay({
     runDiagnosticsCheck();
   }, []);
 
+  useEffect(() => {
+    const fetchGiveawayBlueprints = async () => {
+      try {
+        const res = await apiFetch("/api/giveaway-blueprints");
+        if (res.ok) setGiveawayBlueprints(await res.json());
+      } catch (err) {
+        console.error("Failed to load giveaway blueprints:", err);
+      }
+    };
+    fetchGiveawayBlueprints();
+  }, []);
+
   const handleResetChatHistory = () => {
     localStorage.removeItem("PAC_CHAT_HISTORY");
     hasSpokenGreetingRef.current = false;
@@ -658,7 +673,7 @@ export default function PacOverlay({
     const navMatch = text.match(/\[ACTION:\s*NAVIGATE:\s*([a-z0-9_-]+)\]/i);
     if (navMatch) {
       const targetView = navMatch[1].toLowerCase();
-      const validViews = ['board', 'crm', 'memory', 'bots', 'partner', 'learning'];
+      const validViews = ['board', 'crm', 'memory', 'bots', 'partner', 'learning', 'social-posting'];
       if (validViews.includes(targetView)) {
         onNavigateView?.(targetView as any);
         setComputerLogs(prev => [...prev, `[P.A.C. NAVIGATOR] Switched main app view to '${targetView}'.`]);
@@ -1516,6 +1531,16 @@ We deliver full-stack software, automated workflows, voice bots, and custom inte
    - ZERO AI buzzwords or corporate jargon (strictly BANNED: "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "testament").
    - 100% focused on rapport, empathy, diagnostic questions, and upfront problem solving—never pushy selling or premature deposit demands.
 
+[SAFE GIVEAWAY BLUEPRINTS]
+- Use at most one approved blueprint, only when the lead's authentic evidence clearly satisfies its evidenceRequired list and none of its neverUseWhen conditions apply.
+- If uncertain, ask a normal diagnostic question and use no blueprint. Never invent a giveaway.
+- Include every completeInstructions step and the successCheck. The recipient must be able to finish it without us.
+- Never create dependency, omit a step, request credentials, alter billing, handle sensitive information, delete data, move messages, or send bulk/automatic sales messages.
+- Optional paid work must solve a separate larger problem. It is never required to complete or repair the giveaway.
+
+Approved library loaded from the server:
+${JSON.stringify(giveawayBlueprints)}
+
 [TARGET VERTICAL STRATEGY FOR CLIENT #1 & #2]
 - REJECT HEAVY CORPORATE & REGULATED HEALTHCARE: Healthcare networks, hospitals, and large corporate divisions have multi-month procurement cycles, HIPAA compliance sign-offs, vendor board reviews, corporate insurance mandates, and strict licensing requirements. Do NOT target these for Client #1 or #2!
 - COMMERCIAL SOLVENCY & BUDGET QUALIFICATION: Target established micro-businesses generating active revenue (HVAC/plumbing contractors, active real estate brokers, boutique marketing/recruiting agencies with 1-10 employees). They have real cash flow, feel severe operational pain, and can easily approve a $500–$1,500 50% deposit on the spot.
@@ -1593,13 +1618,13 @@ This will automatically update your database and notes so you do not forget them
                 functions: [
                   {
                     name: "navigate_view",
-                    description: "Navigate to a specific view/screen in the application (board, crm, memory, bots, partner, learning)",
+                    description: "Navigate to a specific view/screen in the application (board, crm, memory, bots, partner, learning, social-posting)",
                     parameters: {
                       type: "object",
                       properties: {
                         view: {
                           type: "string",
-                          enum: ["board", "crm", "memory", "bots", "partner", "learning"],
+                          enum: ["board", "crm", "memory", "bots", "partner", "learning", "social-posting"],
                           description: "The view ID to navigate to"
                         }
                       },
@@ -4011,20 +4036,16 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                             />
                           </div>
                           
-                          {/* Image rendering using Pollinations AI with Zoom Click */}
+                          {/* Generated campaign image with Zoom Click */}
                           <div 
-                            onClick={() => {
-                              if (post.imagePrompt) {
-                                setZoomImageUrl(`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=1200&height=800&nologo=true&private=true`);
-                              }
-                            }}
+                            onClick={() => post.imageUrl && setZoomImageUrl(post.imageUrl)}
                             className="relative h-[110px] rounded-lg overflow-hidden border border-slate-850 bg-slate-950 flex items-center justify-center cursor-pointer group hover:border-cyan-400 transition"
                             title="Click to expand high-resolution graphic"
                           >
-                            {post.imagePrompt ? (
+                            {post.imageUrl ? (
                               <>
                                 <img
-                                  src={`https://image.pollinations.ai/prompt/${encodeURIComponent(post.imagePrompt)}?width=400&height=250&nologo=true&private=true`}
+                                  src={post.imageUrl}
                                   alt={post.platform}
                                   className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                                   loading="lazy"
@@ -4035,7 +4056,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                                 </div>
                               </>
                             ) : (
-                              <div className="text-[9px] text-slate-600 font-mono text-center">No image planned</div>
+                              <div className="px-3 text-[9px] text-slate-600 font-mono text-center">No image generated. Check the image API key and try the campaign again.</div>
                             )}
                             <div className="absolute bottom-1 right-1 bg-slate-900/80 px-1.5 py-0.5 rounded text-[8px] text-slate-400 font-mono border border-slate-800 pointer-events-none">
                               🔍 Zoom
@@ -4047,7 +4068,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                             <div className="col-span-1 md:col-span-2 space-y-2 bg-[#03201e] p-3 rounded-lg border border-teal-500/30">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5 text-teal-300 font-mono text-[9px] font-bold uppercase tracking-wider">
-                                  <Sparkles size={11} className="text-cyan-400" /> 30-Sec Video / Loom Demo Outline
+                                  <Sparkles size={11} className="text-cyan-400" /> 15-Sec Professional Video Direction
                                 </div>
                                 
                                 <button
@@ -4063,7 +4084,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                                     </>
                                   ) : (
                                     <>
-                                      <span>🎬 Render Runway AI Video (5s)</span>
+                                      <span>🎬 Render Multi-Shot Video + Sound (15s)</span>
                                     </>
                                   )}
                                 </button>

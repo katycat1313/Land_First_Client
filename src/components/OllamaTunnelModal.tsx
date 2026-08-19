@@ -31,12 +31,21 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [activeSetupTab, setActiveSetupTab] = useState<"powershell" | "cloudflare" | "pinggy" | "lan">("powershell");
 
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const saved = typeof window !== "undefined" ? (localStorage.getItem("app_password") || "") : "";
+    const headers = new Headers(options.headers || {});
+    if (saved) {
+      headers.set("x-app-password", saved);
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   // Fetch current LLM config on mount
   useEffect(() => {
     if (!isOpen) return;
     const fetchConfig = async () => {
       try {
-        const res = await fetch("/api/llm/config");
+        const res = await apiFetch("/api/llm/config");
         if (res.ok) {
           const data = await res.json();
           if (data.baseUrl) setBaseUrl(data.baseUrl);
@@ -54,7 +63,7 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch("/api/llm/status", {
+      const res = await apiFetch("/api/llm/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -80,7 +89,7 @@ export default function OllamaTunnelModal({ isOpen, onClose, onConfigUpdated }: 
     setIsSaving(true);
     setSaveMessage("");
     try {
-      const res = await fetch("/api/llm/config", {
+      const res = await apiFetch("/api/llm/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

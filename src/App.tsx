@@ -149,6 +149,16 @@ export default function App() {
     };
   };
 
+  // Helper to perform API fetch requests with authentication headers
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const saved = localStorage.getItem("app_password") || "";
+    const headers = new Headers(options.headers || {});
+    if (saved) {
+      headers.set("x-app-password", saved);
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   // Check auth requirement and verify saved password
   const checkAuthStatus = async () => {
     try {
@@ -282,7 +292,7 @@ export default function App() {
           console.log(`[Daily Auto-Sweep] First open of the day (${todayStr}). Dispatching automated morning discovery sweep...`);
 
           // Check if crawl is already running
-          const statusRes = await fetch("/api/crawl/status");
+          const statusRes = await apiFetch("/api/crawl/status");
           if (statusRes.ok) {
             const status = await statusRes.json();
             if (status.active) {
@@ -292,10 +302,9 @@ export default function App() {
           }
 
           // Trigger automated morning sweep targeting high-priority marketing agencies & contractors
-          const reqHeaders = getAuthHeaders({ "Content-Type": "application/json" });
-          const triggerRes = await fetch("/api/bot-config/trigger-sweep", {
+          const triggerRes = await apiFetch("/api/bot-config/trigger-sweep", {
             method: "POST",
-            headers: reqHeaders,
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               sector: "Marketing agency",
               keyword: "CRM webhook automation workflow",
@@ -344,7 +353,7 @@ export default function App() {
     let wasActive = false;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch("/api/crawl/status");
+        const res = await apiFetch("/api/crawl/status");
         if (res.ok) {
           const data = await res.json();
           setGlobalCrawlStatus(data);
@@ -382,7 +391,7 @@ export default function App() {
         ? opportunities.find(o => o.id === partnerSelectedOppId)
         : null;
 
-      const res = await fetch("/api/partner/chat", {
+      const res = await apiFetch("/api/partner/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -417,7 +426,7 @@ export default function App() {
         ? opportunities.find(o => o.id === partnerSelectedOppId)
         : null;
 
-      const res = await fetch("/api/partner/chat", {
+      const res = await apiFetch("/api/partner/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -442,7 +451,7 @@ export default function App() {
     setIsSimulating(true);
 
     try {
-      const res = await fetch("/api/learning/simulate", {
+      const res = await apiFetch("/api/learning/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ opportunities })
@@ -464,7 +473,7 @@ export default function App() {
     setIsOptimizing(true);
 
     try {
-      const res = await fetch("/api/learning/optimize", {
+      const res = await apiFetch("/api/learning/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ opportunities })
@@ -475,7 +484,7 @@ export default function App() {
       setOptimizationResult(data);
 
       // Reload config to sync active changes instantly!
-      const botRes = await fetch("/api/bot-config");
+      const botRes = await apiFetch("/api/bot-config");
       if (botRes.ok) {
         const botData = await botRes.json();
         setBotConfig(botData);
@@ -535,7 +544,7 @@ export default function App() {
   // 1. Save or Update opportunity
   const handleSaveOpportunity = async (updated: Opportunity) => {
     try {
-      const response = await fetch("/api/opportunities/save", {
+      const response = await apiFetch("/api/opportunities/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated)
@@ -562,7 +571,7 @@ export default function App() {
     if (!confirm("Are you sure you want to dismiss this opportunity? It will be removed from your crawler database.")) return;
 
     try {
-      const response = await fetch(`/api/opportunities/${id}`, {
+      const response = await apiFetch(`/api/opportunities/${id}`, {
         method: "DELETE"
       });
       if (!response.ok) throw new Error("Failed to delete.");
@@ -587,7 +596,7 @@ export default function App() {
     setDiscoveryTrace([]); // Reset diagnostic trace at start
     setDiscoveryMessage("Querying the permitted, enabled crawler sources for the chosen sector...");
     try {
-      const response = await fetch("/api/opportunities/discover", {
+      const response = await apiFetch("/api/opportunities/discover", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sector: discoverySector, keyword: discoveryKeyword, discoveryMode })
@@ -619,7 +628,7 @@ export default function App() {
       setOpportunities(prev => [...opportunitiesList, ...prev]);
       
       // Fetch latest stats directly from backend
-      const statsRes = await fetch("/api/stats");
+      const statsRes = await apiFetch("/api/stats");
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
@@ -642,7 +651,7 @@ export default function App() {
     setIsAnalyzing(true);
     setAnalysisError("");
     try {
-      const response = await fetch("/api/opportunities/analyze-custom", {
+      const response = await apiFetch("/api/opportunities/analyze-custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -658,7 +667,7 @@ export default function App() {
       setOpportunities(prev => [newOpp, ...prev]);
       
       // Update statistics
-      const statsRes = await fetch("/api/stats");
+      const statsRes = await apiFetch("/api/stats");
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
@@ -685,7 +694,7 @@ export default function App() {
     setIsScraping(true);
     setScrapeError("");
     try {
-      const response = await fetch("/api/opportunities/scrape-url", {
+      const response = await apiFetch("/api/opportunities/scrape-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -704,7 +713,7 @@ export default function App() {
       setOpportunities(prev => [newOpp, ...prev]);
 
       // Fetch updated stats
-      const statsRes = await fetch("/api/stats");
+      const statsRes = await apiFetch("/api/stats");
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
@@ -725,7 +734,7 @@ export default function App() {
     setBotConfigSaving(true);
     setBotConfigSaveMessage("");
     try {
-      const res = await fetch("/api/bot-config", {
+      const res = await apiFetch("/api/bot-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatedConfig)
@@ -748,7 +757,7 @@ export default function App() {
     setIsSweepingBot(true);
     setRunLogs(["[Initiating Live Scan...] Syncing platform crawler daemons...", "[Ready] Triggering full fleet live sweep..."]);
     try {
-      const res = await fetch("/api/bot-config/trigger-sweep", {
+      const res = await apiFetch("/api/bot-config/trigger-sweep", {
         method: "POST"
       });
       if (!res.ok) throw new Error("Bot Fleet discovery sweep cycle failed.");
@@ -759,7 +768,7 @@ export default function App() {
       // Poll status every 1.5 seconds to pull new logs in real-time
       const interval = setInterval(async () => {
         try {
-          const statusRes = await fetch("/api/crawl/status");
+          const statusRes = await apiFetch("/api/crawl/status");
           if (statusRes.ok) {
             const statusData = await statusRes.json();
             
@@ -795,7 +804,7 @@ export default function App() {
     if (!confirm("Are you sure you want to clear all simulated notification logs?")) return;
     setIsClearingAlerts(true);
     try {
-      const res = await fetch("/api/alerts", { method: "DELETE" });
+      const res = await apiFetch("/api/alerts", { method: "DELETE" });
       if (res.ok) {
         setAlerts([]);
       }
@@ -885,7 +894,7 @@ export default function App() {
 
   // 5. Draft response helper (passed down to detail drawer)
   const handleDraftResponse = async (opp: Opportunity, guidance: string) => {
-    const response = await fetch("/api/opportunities/draft-response", {
+    const response = await apiFetch("/api/opportunities/draft-response", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ opportunity: opp, userGuidance: guidance })
@@ -1028,7 +1037,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#01070e] text-slate-100 flex flex-col font-sans selection:bg-[#3b82f6] selection:text-white" id="main-container">
+    <div className="min-h-screen xl:h-screen xl:overflow-hidden bg-[#01070e] text-slate-100 flex flex-col font-sans selection:bg-[#3b82f6] selection:text-white" id="main-container">
       
       {/* 1. Global Header with real-time indicators */}
       <header className="border-b border-[#93c5fd]/20 bg-[#1e838a] px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-white shadow-md">
@@ -1609,7 +1618,7 @@ export default function App() {
                 id="tab-bots-btn"
                 type="button"
               >
-                🤖 Bot Fleet
+                🤖 Bots
               </button>
               <button
                 onClick={() => handleSelectView('partner')}
@@ -1625,7 +1634,7 @@ export default function App() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
                 </span>
-                🧠 Sales Co-Pilot
+                🧠 Co-Pilot
               </button>
               <button
                 onClick={() => handleSelectView('learning')}
@@ -1637,7 +1646,7 @@ export default function App() {
                 id="tab-learning-btn"
                 type="button"
               >
-                🎯 Self-Learning
+                🎯 Learning
               </button>
               <button
                 onClick={() => handleSelectView('social-posting')}
@@ -1650,7 +1659,7 @@ export default function App() {
                 type="button"
               >
                 <Calendar className="w-3.5 h-3.5 text-teal-400" />
-                🗓️ Social Posting & Calendar
+                🗓️ Social Calendar
               </button>
             </div>
 
