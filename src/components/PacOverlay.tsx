@@ -3,7 +3,8 @@ import {
   Mic, MicOff, Volume2, VolumeX, Monitor, Send, Sparkles, Cpu,
   Terminal, Play, Square, Check, AlertCircle, X, ChevronRight,
   User, Bot, HelpCircle, CornerDownLeft, RefreshCw, Layers, Plus, Zap,
-  Trash2, Save, Calendar, Activity, Settings, Sliders, Copy, Maximize2, Download, ExternalLink, Image as ImageIcon
+  Trash2, Save, Calendar, Activity, Settings, Sliders, Copy, Maximize2, Download,
+  ExternalLink, Image as ImageIcon, Paperclip, FileText
 } from "lucide-react";
 import { sendGmailEmail } from "../utils/gmailApi";
 import { Opportunity } from "../types";
@@ -85,6 +86,55 @@ export default function PacOverlay({
     setPacStatusState(status);
   };
   const [textInput, setTextInput] = useState("");
+  type PacAttachment = { id: string; name: string; mimeType: string; kind: "text" | "binary"; content: string; size: number };
+  const [pendingAttachments, setPendingAttachments] = useState<PacAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
+
+  const handlePacAttachmentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    setAttachmentError("");
+
+    const remainingSlots = Math.max(0, 4 - pendingAttachments.length);
+    if (remainingSlots === 0) {
+      setAttachmentError("Remove an attachment before adding another. Four files are allowed per message.");
+      return;
+    }
+
+    const accepted: PacAttachment[] = [];
+    let totalBytes = pendingAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
+    for (const file of files.slice(0, remainingSlots)) {
+      const extension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+      const isText = [".txt", ".md", ".json", ".csv", ".html", ".xml"].includes(extension);
+      const isPdf = file.type === "application/pdf" || extension === ".pdf";
+      const isImage = file.type.startsWith("image/");
+      const maxBytes = isText ? 500_000 : 4_000_000;
+      if ((!isText && !isPdf && !isImage) || file.size > maxBytes || totalBytes + file.size > 5_500_000) {
+        setAttachmentError("Use text, Markdown, JSON, CSV, HTML, XML, PDF, or image files. Text files may be 500 KB; PDFs/images 4 MB; total 5.5 MB.");
+        continue;
+      }
+
+      const content = isText
+        ? (await file.text()).slice(0, 200_000)
+        : await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error || new Error("File read failed"));
+            reader.readAsDataURL(file);
+          });
+      accepted.push({
+        id: crypto.randomUUID(),
+        name: file.name.slice(0, 180),
+        mimeType: isPdf ? "application/pdf" : (file.type || "application/octet-stream"),
+        kind: isText ? "text" : "binary",
+        content,
+        size: file.size
+      });
+      totalBytes += file.size;
+    }
+    if (accepted.length) setPendingAttachments(current => [...current, ...accepted].slice(0, 4));
+  };
   type PacMessage = { id?: string; role: "user" | "pac"; text: string; time: string; createdAt?: string };
   const [messages, setMessages] = useState<PacMessage[]>(() => {
     try {
@@ -2755,7 +2805,7 @@ registerProcessor('pcm-processor', PCMProcessor);
   // API INTEGRATION & CHAT ROUTER
   // ----------------------------------------------------
   const handleSendInput = async (userInputText: string) => {
-    if (!userInputText.trim()) return;
+    if (!userInputText.trim() && pendingAttachments.length === 0) return;
 
     // Barge-in check: If speaking, cancel instantly!
     if (window.speechSynthesis.speaking) {
@@ -2763,13 +2813,19 @@ registerProcessor('pcm-processor', PCMProcessor);
     }
     stopStreamingPlayback();
 
-    const currentMsg = userInputText;
+    const attachmentsForTurn = [...pendingAttachments];
+    const currentMsg = userInputText.trim() || "Please review the attached information and help me decide what to do with it.";
+    const visibleMessage = attachmentsForTurn.length
+      ? `${currentMsg}\n\nAttached: ${attachmentsForTurn.map(attachment => attachment.name).join(", ")}`
+      : currentMsg;
     setTextInput("");
+    setPendingAttachments([]);
+    setAttachmentError("");
 
     // Add user message to state
     const userMsgObj = {
       role: "user" as const,
-      text: currentMsg,
+      text: visibleMessage,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
     setMessages(prev => [...prev, userMsgObj]);
@@ -2781,7 +2837,7 @@ registerProcessor('pcm-processor', PCMProcessor);
     }
 
     // IF Deepgram voice agent WebSocket is active and connected, inject user message
-    if (dgSocketRef.current && dgConnectionStatus === "connected") {
+    if (dgSocketRef.current && dgConnectionStatus === "connected" && attachmentsForTurn.length === 0) {
       try {
         const injectPayload = {
           type: "InjectUserMessage",
@@ -2801,6 +2857,7 @@ registerProcessor('pcm-processor', PCMProcessor);
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: currentMsg,
+          attachments: attachmentsForTurn,
           history: messages.map(m => ({ role: m.role === "user" ? "user" : "model", text: m.text })),
           screenFrame: lastCapturedFrame, // base64 payload
           opportunities: opportunities.map(o => ({
@@ -4890,6 +4947,20 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
 
           {/* 4. Draggable Footer Action Input Block */}
           <div className="p-3 bg-slate-900/60 border-t border-slate-800/80 flex flex-col gap-2">
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {pendingAttachments.map(attachment => (
+                  <span key={attachment.id} className="inline-flex max-w-full items-center gap-1 rounded border border-cyan-500/30 bg-cyan-950/50 px-2 py-1 text-[9px] font-mono text-cyan-100">
+                    {attachment.kind === "text" ? <FileText size={10} /> : <ImageIcon size={10} />}
+                    <span className="max-w-[180px] truncate">{attachment.name}</span>
+                    <button type="button" onClick={() => setPendingAttachments(current => current.filter(item => item.id !== attachment.id))} className="text-cyan-300 hover:text-rose-300" aria-label={`Remove ${attachment.name}`}>
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {attachmentError && <div className="text-[9px] font-mono text-rose-300">{attachmentError}</div>}
             {/* Live voice activity status & meters if Deepgram or voice active */}
             {dgConnectionStatus === "connected" && (
               <div className="flex items-center justify-between text-[9px] font-mono px-1 py-0.5 bg-slate-950/80 border border-slate-800/60 rounded">
@@ -5014,6 +5085,16 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                 onSubmit={(e) => { e.preventDefault(); handleSendInput(textInput); }}
                 className="flex-1 flex gap-2"
               >
+                <label className="flex cursor-pointer items-center justify-center rounded-lg border border-slate-700 bg-slate-950 px-2 text-slate-300 hover:border-cyan-500 hover:text-cyan-300" title="Attach information for P.A.C.">
+                  <Paperclip size={13} />
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt,.md,.json,.csv,.html,.xml,.pdf,image/png,image/jpeg,image/webp,image/gif"
+                    onChange={handlePacAttachmentUpload}
+                    className="sr-only"
+                  />
+                </label>
                 <input
                   id="pac-chat-text-input"
                   aria-label="Collaborate with P.A.C. co-founder text input"
@@ -5029,7 +5110,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                 />
                 <button
                   type="submit"
-                  disabled={!textInput.trim() || pacStatus === "thinking"}
+                  disabled={(!textInput.trim() && pendingAttachments.length === 0) || pacStatus === "thinking"}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-950 disabled:text-slate-600 text-white rounded-lg transition flex items-center justify-center gap-1 cursor-pointer text-xs font-semibold"
                 >
                   <Send size={12} />
