@@ -4614,7 +4614,7 @@ CONTINUITY LOCK:
 
 Return strict JSON only with this structure:
 {"continuityBible":"35-70 words defining the locked visual facts","blocks":[{"prompt":"shot description including exact starting state, action, camera motion, and exact ending state","duration":5},{"prompt":"...","duration":5},{"prompt":"...","duration":5}]}`,
-    prompt: `Creative brief:\n${String(creativeBrief || "A practical small-business workflow improvement").slice(0, 1200)}\n\nAuthored shot ideas, if useful:\n${sourceBlocks.length ? sourceBlocks.join("\n") : "None"}`,
+    prompt: `Creative brief:\n${String(creativeBrief || "A practical small-business workflow improvement").slice(0, 12000)}\n\nAuthored shot ideas, if useful:\n${sourceBlocks.length ? sourceBlocks.join("\n") : "None"}`,
     responseJson: true,
     temperature: 0.15
   });
@@ -4657,6 +4657,9 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
   const { promptText, referenceImageUrl, ratio = "1920:1080", blocks } = req.body;
   if (!promptText && !referenceImageUrl) {
     return res.status(400).json({ error: "Prompt or reference image is required." });
+  }
+  if (typeof promptText === "string" && promptText.length > 50_000) {
+    return res.status(413).json({ error: "The video brief must be 50,000 characters or fewer." });
   }
 
   const runwayKey = process.env.RUNWAY_API_KEY;

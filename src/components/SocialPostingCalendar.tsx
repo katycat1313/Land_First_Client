@@ -18,7 +18,8 @@ import {
   MessageSquare,
   RefreshCw,
   Send,
-  Maximize2
+  Maximize2,
+  Upload
 } from "lucide-react";
 
 export interface SocialPost {
@@ -42,6 +43,7 @@ export interface SocialPost {
     usage: "research-only";
   }>;
   videoScriptPrompt?: string;
+  videoBriefSourceName?: string;
   videoBlocks?: Array<{ prompt: string; duration: number }>;
   videoUrl?: string;
   audioPrompt?: string;
@@ -67,6 +69,40 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
   // Video generation states
   const [isRenderingVideo, setIsRenderingVideo] = useState(false);
   const [videoStatusMsg, setVideoStatusMsg] = useState("");
+
+  const handleVideoBriefUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedPost) return;
+
+    const allowedExtensions = [".txt", ".md", ".json", ".csv"];
+    const extension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    if (!allowedExtensions.includes(extension)) {
+      setVideoStatusMsg("Upload a text, Markdown, JSON, or CSV brief.");
+      return;
+    }
+    if (file.size > 250_000) {
+      setVideoStatusMsg("The video brief must be 250 KB or smaller.");
+      return;
+    }
+
+    try {
+      const uploadedText = (await file.text()).trim();
+      if (!uploadedText) throw new Error("The uploaded file is empty.");
+      const existing = String(selectedPost.videoScriptPrompt || "").trim();
+      const combined = existing
+        ? `${existing}\n\nUploaded creative brief (${file.name}):\n${uploadedText}`
+        : uploadedText;
+      setSelectedPost({
+        ...selectedPost,
+        videoScriptPrompt: combined.slice(0, 50_000),
+        videoBriefSourceName: file.name
+      });
+      setVideoStatusMsg(`Loaded ${file.name}. The continuity planner will condense it into three filmable shots.`);
+    } catch (error: any) {
+      setVideoStatusMsg(`Could not read the brief: ${error.message || "unknown error"}`);
+    }
+  };
 
   // Image generation states
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -292,7 +328,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          promptText: promptText.substring(0, 500),
+          promptText: promptText.substring(0, 50_000),
           referenceImageUrl: selectedPost.imageUrl || undefined,
           blocks: selectedPost.videoBlocks,
           duration: 15,
@@ -835,13 +871,28 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
                   {/* Video Script & Runway AI Video Generator */}
                   <div className="space-y-2">
-                    <label className="text-[9px] font-mono uppercase text-teal-300 block">15-Sec Video Direction</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[9px] font-mono uppercase text-teal-300 block">15-Sec Video Direction</label>
+                      <label className="inline-flex cursor-pointer items-center gap-1 rounded border border-cyan-500/40 bg-cyan-950/50 px-2 py-1 text-[8px] font-mono font-bold uppercase text-cyan-200 hover:bg-cyan-900/60">
+                        <Upload size={10} /> Upload Brief
+                        <input
+                          type="file"
+                          accept=".txt,.md,.json,.csv,text/plain,text/markdown,application/json,text/csv"
+                          onChange={handleVideoBriefUpload}
+                          className="sr-only"
+                        />
+                      </label>
+                    </div>
                     <textarea
                       value={selectedPost.videoScriptPrompt || ""}
                       onChange={(e) => setSelectedPost({ ...selectedPost, videoScriptPrompt: e.target.value })}
-                      placeholder="Hook, proof, and result for a concise professional video..."
-                      className="w-full h-[70px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-none"
+                      placeholder="Type a direction or upload a longer creative brief. P.A.C. will condense it into continuity-locked shots..."
+                      className="w-full h-[120px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-y"
                     />
+                    <div className="flex justify-between gap-2 text-[8px] font-mono text-teal-200/60">
+                      <span>{selectedPost.videoBriefSourceName ? `Source: ${selectedPost.videoBriefSourceName}` : "TXT, MD, JSON, or CSV · 250 KB max"}</span>
+                      <span>{(selectedPost.videoScriptPrompt || "").length.toLocaleString()} / 50,000 characters</span>
+                    </div>
 
                     <label className="text-[9px] font-mono uppercase text-teal-300 block">Sound Direction</label>
                     <textarea
