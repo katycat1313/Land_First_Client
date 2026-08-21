@@ -2265,6 +2265,179 @@ app.get("/api/agent/memory", (req, res) => {
   res.json(mem);
 });
 
+const PAC_CONVERSATION_SNAPSHOT_ID = "pac-conversation-snapshot";
+const PAC_PRIMARY_OWNER_KEY = "primary-partner";
+
+const loadFallbackPacConversation = () => {
+  const memory = loadAgentMemory();
+  const snapshot = (Array.isArray(memory.entries) ? memory.entries : [])
+    .find((entry: any) => entry?.id === PAC_CONVERSATION_SNAPSHOT_ID);
+  try {
+    const messages = snapshot?.note ? JSON.parse(snapshot.note) : [];
+    return Array.isArray(messages) ? messages.slice(-60) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveFallbackPacConversation = (messages: any[]) => {
+  const memory = loadAgentMemory();
+  const entries = (Array.isArray(memory.entries) ? memory.entries : [])
+    .filter((entry: any) => entry?.id !== PAC_CONVERSATION_SNAPSHOT_ID);
+  entries.unshift({
+    id: PAC_CONVERSATION_SNAPSHOT_ID,
+    timestamp: new Date().toISOString(),
+    tag: "P.A.C. Conversation History",
+    note: JSON.stringify(messages.slice(-60)),
+    prospect: "General"
+  });
+  memory.entries = entries;
+  saveAgentMemory(memory);
+};
+
+const getOrCreatePacConversation = async () => {
+  const db = getSupabase();
+  if (!db) return null;
+  const { data: existing, error: selectError } = await db
+    .from("pac_conversations")
+    .select("id, rolling_summary, personalization, summarized_message_count")
+    .eq("owner_key", PAC_PRIMARY_OWNER_KEY)
+    .maybeSingle();
+  if (selectError) throw selectError;
+  if (existing) return existing;
+
+  const { data: created, error: insertError } = await db
+    .from("pac_conversations")
+    .insert({ owner_key: PAC_PRIMARY_OWNER_KEY })
+    .select("id, rolling_summary, personalization, summarized_message_count")
+    .single();
+  if (insertError) throw insertError;
+  return created;
+};
+
+const refreshPacConversationMemory = async (conversation: any) => {
+  const db = getSupabase();
+  if (!db || !conversation?.id) return;
+  const { count, error: countError } = await db
+    .from("pac_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("conversation_id", conversation.id);
+  if (countError || !count) return;
+  if (count < Number(conversation.summarized_message_count || 0) + 8) return;
+
+  const { data: recentRows, error: rowsError } = await db
+    .from("pac_messages")
+    .select("role, content, created_at")
+    .eq("conversation_id", conversation.id)
+    .order("created_at", { ascending: false })
+    .limit(40);
+  if (rowsError || !recentRows?.length) return;
+
+  const transcript = recentRows.reverse()
+    .map((row: any) => `${row.role === "user" ? "Partner" : "P.A.C."}: ${row.content}`)
+    .join("\n");
+  const raw = await generateUnifiedLLM({
+    systemPrompt: `Maintain durable memory for an AI business partner. Extract only facts explicitly stated or agreed in the conversation. Never infer personal details, client results, credentials, promises, or preferences. Preserve active goals, projects, decisions, constraints, preferred tone, rejected approaches, and unresolved follow-ups. Return strict JSON only.`,
+    prompt: `Existing rolling summary:\n${conversation.rolling_summary || "None"}\n\nRecent transcript:\n${transcript}\n\nReturn {"rollingSummary":"concise durable context under 900 words","personalization":{"goals":[],"projects":[],"preferences":[],"decisions":[],"constraints":[],"openLoops":[]}}`,
+    responseJson: true,
+    temperature: 0.1
+  });
+  const parsed = safeParseJSON(raw || "{}");
+  if (!parsed?.rollingSummary) return;
+  const { error: updateError } = await db.from("pac_conversations").update({
+    rolling_summary: String(parsed.rollingSummary).slice(0, 12000),
+    personalization: parsed.personalization && typeof parsed.personalization === "object" ? parsed.personalization : {},
+    summarized_message_count: count,
+    updated_at: new Date().toISOString()
+  }).eq("id", conversation.id);
+  if (updateError) throw updateError;
+};
+
+// Persistent rolling P.A.C. transcript. Supabase is authoritative; the agent
+// memory snapshot remains a graceful fallback until/if the migration is absent.
+app.get("/api/agent/conversation", async (_req, res) => {
+  try {
+    const conversation = await getOrCreatePacConversation();
+    if (!conversation) return res.json({ messages: loadFallbackPacConversation(), storage: "memory-fallback" });
+    const db = getSupabase();
+    const { data, error } = await db
+      .from("pac_messages")
+      .select("client_message_id, role, content, created_at")
+      .eq("conversation_id", conversation.id)
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (error) throw error;
+    const messages = (data || []).reverse().map((row: any) => ({
+      id: row.client_message_id,
+      role: row.role,
+      text: row.content,
+      time: new Date(row.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      createdAt: row.created_at
+    }));
+    return res.json({
+      conversationId: conversation.id,
+      messages,
+      rollingSummary: conversation.rolling_summary || "",
+      personalization: conversation.personalization || {},
+      storage: "supabase"
+    });
+  } catch (error: any) {
+    console.warn("[P.A.C. Conversation] Supabase unavailable; using memory fallback:", error.message || error);
+    return res.json({ messages: loadFallbackPacConversation(), storage: "memory-fallback" });
+  }
+});
+
+app.post("/api/agent/conversation", async (req, res) => {
+  try {
+    const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const messages = rawMessages
+      .filter((message: any) => (message?.role === "user" || message?.role === "pac") && typeof message?.text === "string")
+      .slice(-60)
+      .map((message: any) => ({
+        id: typeof message.id === "string" && message.id ? message.id.slice(0, 160) : crypto.randomUUID(),
+        role: message.role,
+        text: message.text.trim().slice(0, 4000),
+        time: typeof message.time === "string" ? message.time.slice(0, 40) : "",
+        createdAt: typeof message.createdAt === "string" ? message.createdAt : new Date().toISOString()
+      }))
+      .filter((message: any) => message.text);
+
+    saveFallbackPacConversation(messages);
+    const conversation = await getOrCreatePacConversation();
+    if (!conversation) return res.json({ success: true, messageCount: messages.length, storage: "memory-fallback" });
+    const db = getSupabase();
+    const rows = messages.map((message: any) => ({
+      conversation_id: conversation.id,
+      client_message_id: message.id,
+      role: message.role,
+      content: message.text,
+      created_at: message.createdAt
+    }));
+    if (rows.length > 0) {
+      const { error } = await db.from("pac_messages").upsert(rows, { onConflict: "client_message_id" });
+      if (error) throw error;
+      await db.from("pac_conversations").update({
+        updated_at: new Date().toISOString(),
+        last_message_at: messages[messages.length - 1].createdAt
+      }).eq("id", conversation.id);
+
+      const memoryRefresh = refreshPacConversationMemory(conversation).catch(error => {
+        console.error("[P.A.C. Conversation] Rolling memory refresh failed:", error);
+      });
+      const ctx = (globalThis as any).__ctx;
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(memoryRefresh);
+      else {
+        (globalThis as any).__pendingPromises = (globalThis as any).__pendingPromises || [];
+        (globalThis as any).__pendingPromises.push(memoryRefresh);
+      }
+    }
+    res.json({ success: true, conversationId: conversation.id, messageCount: messages.length, storage: "supabase" });
+  } catch (error: any) {
+    console.error("Error saving P.A.C. conversation:", error);
+    res.json({ success: true, messageCount: loadFallbackPacConversation().length, storage: "memory-fallback" });
+  }
+});
+
 // POST /api/agent/memory
 app.post("/api/agent/memory", (req, res) => {
   try {
@@ -4970,6 +5143,17 @@ app.post("/api/pac/chat", async (req, res) => {
   try {
     const { message, history, screenFrame, opportunities, computerLogs } = req.body;
     const ai = getGeminiClient();
+    const persistentMemory = loadAgentMemory();
+    let conversationMemory: any = null;
+    try {
+      conversationMemory = await getOrCreatePacConversation();
+    } catch (error: any) {
+      console.warn("[P.A.C. Chat] Database conversation memory unavailable:", error.message || error);
+    }
+    const memoryEntries = (Array.isArray(persistentMemory.entries) ? persistentMemory.entries : [])
+      .filter((entry: any) => entry?.id !== PAC_CONVERSATION_SNAPSHOT_ID)
+      .slice(0, 20)
+      .map((entry: any) => ({ timestamp: entry.timestamp, tag: entry.tag, note: entry.note, prospect: entry.prospect }));
 
     // Compile P.A.C. Core Instructions & Business Partner Persona
     const pacSystemPrompt = `
@@ -5135,8 +5319,16 @@ YOU ARE AN EQUAL CO-FOUNDER AND REVENUE STRATEGIST. YOU ARE STRICTLY FORBIDDEN F
 
 [CONVERSATIONAL CONTINUITY & RE-ACTIVATION DIRECTIVE]
 - DO NOT repeat canned introductory speeches or self-introductions (e.g. "Hi, my name is P.A.C...").
-- You are connected to persistent memory and full conversation history. Seamlessly pick up right where we left off.
+- You receive persistent memory plus the latest conversation turns below. Use both to pick up where the discussion left off.
+- Screen images are supplemental current-view evidence only. Never assume a screenshot contains prior messages that are off-screen.
 - Jump straight into active deal execution, pipeline strategy, or answering your partner's exact prompt.
+
+[PERSISTENT AGENT MEMORY]
+Summary: ${persistentMemory.summary || "No saved summary yet."}
+Conversation summary: ${conversationMemory?.rolling_summary || "No distilled conversation summary yet."}
+Personalization learned from explicit discussions: ${JSON.stringify(conversationMemory?.personalization || {}, null, 2)}
+Recent memory entries: ${JSON.stringify(memoryEntries, null, 2)}
+Pending follow-ups: ${JSON.stringify((persistentMemory.followUps || []).filter((task: any) => !task.completed).slice(0, 20), null, 2)}
 
 [CURRENT ACTIVE PIPELINE / OPPORTUNITIES]
 Use this list of active leads to inform your advice or outreach suggestions:
@@ -5183,7 +5375,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     const formattedContents: any[] = [];
 
     // Map history to proper { role, parts } structure
-    const recentHistory = (history || []).slice(-8);
+    const recentHistory = (history || []).slice(-40);
     for (const turn of recentHistory) {
       formattedContents.push({
         role: turn.role === "user" ? "user" : "model",

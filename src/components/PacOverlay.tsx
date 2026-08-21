@@ -85,7 +85,8 @@ export default function PacOverlay({
     setPacStatusState(status);
   };
   const [textInput, setTextInput] = useState("");
-  const [messages, setMessages] = useState<Array<{ role: "user" | "pac"; text: string; time: string }>>(() => {
+  type PacMessage = { id?: string; role: "user" | "pac"; text: string; time: string; createdAt?: string };
+  const [messages, setMessages] = useState<PacMessage[]>(() => {
     try {
       const saved = localStorage.getItem("PAC_CHAT_HISTORY");
       if (saved) {
@@ -101,10 +102,42 @@ export default function PacOverlay({
       {
         role: "pac",
         text: "Partner, I'm online and auditing our pipeline. We have high-pain leads ready for outreach and we need to lock in Client #1 today. Let's look at the highest-leverage lead, review the angle, and get moving.",
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        createdAt: new Date().toISOString()
       }
     ];
   });
+  const [isConversationHydrated, setIsConversationHydrated] = useState(false);
+  const [conversationSummary, setConversationSummary] = useState("");
+  const [conversationPersonalization, setConversationPersonalization] = useState<Record<string, unknown>>({});
+
+  // Restore the Supabase-backed rolling transcript so P.A.C. can resume across
+  // reloads, browsers, and devices instead of relying on the visible screen.
+  useEffect(() => {
+    let cancelled = false;
+    const hydrateConversation = async () => {
+      try {
+        const response = await apiFetch("/api/agent/conversation");
+        if (response.ok) {
+          const data = await response.json();
+          const remoteMessages = Array.isArray(data.messages) ? data.messages : [];
+          if (!cancelled) {
+            setConversationSummary(typeof data.rollingSummary === "string" ? data.rollingSummary : "");
+            setConversationPersonalization(data.personalization && typeof data.personalization === "object" ? data.personalization : {});
+          }
+          if (!cancelled && remoteMessages.length > 0) {
+            setMessages(current => remoteMessages.length >= current.length ? remoteMessages.slice(-60) : current);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to restore P.A.C. conversation history:", err);
+      } finally {
+        if (!cancelled) setIsConversationHydrated(true);
+      }
+    };
+    hydrateConversation();
+    return () => { cancelled = true; };
+  }, []);
 
   // Save conversation history to localStorage on change
   useEffect(() => {
@@ -114,6 +147,36 @@ export default function PacOverlay({
       console.error("Failed to save chat history to localStorage:", err);
     }
   }, [messages]);
+
+  // Give legacy/local messages stable IDs before syncing so repeated snapshot
+  // saves upsert the same database rows rather than duplicating them.
+  useEffect(() => {
+    if (!messages.some(message => !message.id || !message.createdAt)) return;
+    setMessages(current => current.map(message => ({
+      ...message,
+      id: message.id || crypto.randomUUID(),
+      createdAt: message.createdAt || new Date().toISOString()
+    })));
+  }, [messages]);
+
+  // Mirror the rolling transcript into persistent agent memory after initial
+  // hydration. The server caps and validates the snapshot before saving it.
+  useEffect(() => {
+    if (!isConversationHydrated) return;
+    if (messages.some(message => !message.id || !message.createdAt)) return;
+    const timeout = window.setTimeout(async () => {
+      try {
+        await apiFetch("/api/agent/conversation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: messages.slice(-60) })
+        });
+      } catch (err) {
+        console.error("Failed to persist P.A.C. conversation history:", err);
+      }
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [messages, isConversationHydrated]);
 
   // Voice/Speech Engine Refs
   const recognitionRef = useRef<any>(null);
@@ -1568,6 +1631,10 @@ ${JSON.stringify((computerLogs || []).slice(-10), null, 2)}
 [AGENT MEMORY & PERSISTENT CONTEXT]
 Below is your persistent memory from prior conversations. You MUST use this to remember pending tasks and follow-ups:
 - Conversation Summary/Notes: ${agentMemory.summary || "No notes stored yet."}
+- Distilled Conversation Memory: ${conversationSummary || "No distilled conversation memory yet."}
+- Personalization Learned from Explicit Discussions: ${JSON.stringify(conversationPersonalization)}
+- Recent Conversation Transcript:
+${messages.slice(-30).map(message => `  - ${message.role === "user" ? "Partner" : "P.A.C."}: ${message.text}`).join("\n") || "  - No prior transcript is available."}
 - Pending/Due Follow-up Tasks:
 ${agentMemory.followUps && agentMemory.followUps.length > 0
   ? agentMemory.followUps.filter(f => !f.completed).map(f => `  - [ ] ${f.task} ${f.dueDate ? `(Due: ${f.dueDate})` : ""}`).join("\n")
