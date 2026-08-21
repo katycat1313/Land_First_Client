@@ -18,6 +18,23 @@ import { User } from "firebase/auth";
 import PublicLandingView from "./components/PublicLandingView";
 import { SocialPostingCalendar } from "./components/SocialPostingCalendar";
 
+type LocalProspectSignal = {
+  placeId: string;
+  name: string;
+  category: string;
+  address: string;
+  mapsUrl: string;
+  websiteUrl: string | null;
+  phone: string | null;
+  rating: number | null;
+  reviewCount: number;
+  photoCount: number;
+  hasHours: boolean;
+  opportunityScore: number;
+  reasons: string[];
+  recentEvidence: Array<{ text: string; publishedAt: string; authorName: string; authorUri: string | null; signals: string[] }>;
+};
+
 export default function App() {
   const [appMode, setAppMode] = useState<'public' | 'dashboard'>('public');
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -118,6 +135,11 @@ export default function App() {
   const [newTargetPath, setNewTargetPath] = useState("");
   const [alerts, setAlerts] = useState<any[]>([]);
   const [isClearingAlerts, setIsClearingAlerts] = useState(false);
+  const [localProspectLocation, setLocalProspectLocation] = useState("");
+  const [localProspectCategory, setLocalProspectCategory] = useState("HVAC contractor");
+  const [localProspectResults, setLocalProspectResults] = useState<LocalProspectSignal[]>([]);
+  const [isScanningLocalProspects, setIsScanningLocalProspects] = useState(false);
+  const [localProspectError, setLocalProspectError] = useState("");
 
   // AI Brainstorming Partner states
   const [partnerMessages, setPartnerMessages] = useState<Array<{ role: 'user' | 'model'; content: string }>>([
@@ -641,6 +663,32 @@ export default function App() {
       setDiscoveryMessage(`Error: ${err.message || "Failed to discover new opportunities."}`);
     } finally {
       setIsDiscovering(false);
+    }
+  };
+
+  const handleLocalProspectScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!localProspectLocation.trim()) return;
+    setIsScanningLocalProspects(true);
+    setLocalProspectError("");
+    setLocalProspectResults([]);
+    try {
+      const response = await apiFetch("/api/local-prospects/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: localProspectLocation.trim(),
+          category: localProspectCategory,
+          maxResults: 15
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Local prospect scan failed.");
+      setLocalProspectResults(data.results || []);
+    } catch (error: any) {
+      setLocalProspectError(error.message || "Local prospect scan failed.");
+    } finally {
+      setIsScanningLocalProspects(false);
     }
   };
 
@@ -1688,6 +1736,85 @@ export default function App() {
                       <span>{isSweepingBot ? "Running Fleet Sweep..." : "Trigger Full Fleet Sweep"}</span>
                     </button>
                   </div>
+                </div>
+
+                {/* Live Google Places prospect discovery (never persisted) */}
+                <div className="p-5 rounded-2xl border border-emerald-500/25 bg-emerald-950/10 space-y-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <h3 className="font-bold text-white text-sm font-mono flex items-center gap-2">
+                        <Building2 size={16} className="text-emerald-400" /> Local Business Signal Scan
+                      </h3>
+                      <p className="mt-1 text-[11px] text-slate-400 max-w-2xl">
+                        Live Google Places results with direct profile links and raw review evidence from the last 14 days. Google content is not saved to the opportunity database.
+                      </p>
+                    </div>
+                    <span className="text-[9px] font-mono text-slate-500 border border-slate-800 rounded px-2 py-1">Powered by Google Maps</span>
+                  </div>
+
+                  <form onSubmit={handleLocalProspectScan} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
+                    <input
+                      value={localProspectLocation}
+                      onChange={(e) => setLocalProspectLocation(e.target.value)}
+                      placeholder="City and state, e.g. Wilmington, DE"
+                      aria-label="Local prospect city and state"
+                      className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    />
+                    <select
+                      value={localProspectCategory}
+                      onChange={(e) => setLocalProspectCategory(e.target.value)}
+                      aria-label="Local business category"
+                      className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                    >
+                      {["HVAC contractor", "plumber", "roofer", "landscaper", "electrician", "real estate agency", "property management company", "marketing agency", "recruiting agency"].map(category => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="submit"
+                      disabled={isScanningLocalProspects || !localProspectLocation.trim()}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-950 disabled:text-slate-600 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <Search size={13} /> {isScanningLocalProspects ? "Scanning..." : "Scan Area"}
+                    </button>
+                  </form>
+
+                  {localProspectError && <div className="text-xs text-rose-300 bg-rose-950/20 border border-rose-500/20 rounded p-3">{localProspectError}</div>}
+
+                  {localProspectResults.length > 0 && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      {localProspectResults.map(result => (
+                        <div key={result.placeId} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-bold text-sm text-white truncate">{result.name}</div>
+                              <div className="text-[10px] text-slate-500">{result.category} · {result.address}</div>
+                            </div>
+                            <span className="shrink-0 text-xs font-mono font-bold text-emerald-300 bg-emerald-950/50 border border-emerald-500/30 rounded px-2 py-1">{result.opportunityScore}</span>
+                          </div>
+                          <div className="flex gap-2 text-[10px] text-slate-400 flex-wrap">
+                            <span>{result.rating ?? "—"}★ ({result.reviewCount})</span>
+                            <span>{result.photoCount} photos</span>
+                            <span>{result.websiteUrl ? "Website listed" : "No website"}</span>
+                            <span>{result.hasHours ? "Hours listed" : "No hours"}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {result.reasons.map(reason => <span key={reason} className="text-[9px] text-amber-200 bg-amber-950/30 border border-amber-500/20 rounded px-1.5 py-0.5">{reason}</span>)}
+                          </div>
+                          {result.recentEvidence.map((evidence, index) => (
+                            <div key={`${evidence.publishedAt}-${index}`} className="p-2.5 rounded bg-slate-900/60 border border-slate-800 text-[10px] text-slate-300">
+                              <div className="text-slate-500 mb-1">Raw Google review · {new Date(evidence.publishedAt).toLocaleDateString()} · {evidence.authorName}</div>
+                              <div>“{evidence.text}”</div>
+                            </div>
+                          ))}
+                          <div className="flex gap-2">
+                            <a href={result.mapsUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-emerald-300 hover:text-white flex items-center gap-1">Inspect on Google Maps <ExternalLink size={10} /></a>
+                            {result.websiteUrl && <a href={result.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-cyan-300 hover:text-white flex items-center gap-1">Website <ExternalLink size={10} /></a>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Live Log Terminal Sweep Console */}

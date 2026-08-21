@@ -27,8 +27,20 @@ export interface SocialPost {
   scheduledDate: string; // YYYY-MM-DD
   scheduledTime?: string; // HH:MM
   content: string;
+  proofBasis?: "source-backed analysis" | "transparent worked example" | "build in progress" | "working project demo" | string;
   imagePrompt?: string;
   imageUrl?: string;
+  visualReferenceQuery?: string;
+  visualReferences?: Array<{
+    title: string;
+    creator: string | null;
+    sourceUrl: string;
+    thumbnailUrl: string | null;
+    license: string;
+    licenseUrl: string | null;
+    provider: string | null;
+    usage: "research-only";
+  }>;
   videoScriptPrompt?: string;
   videoBlocks?: Array<{ prompt: string; duration: number }>;
   videoUrl?: string;
@@ -268,11 +280,11 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     alert(`📋 Post content copied to clipboard!\n\nOpened ${post.platform} scheduler in a new tab. Paste (⌘+V / Ctrl+V) and set schedule for ${post.scheduledDate}.`);
   };
 
-  // Render a purpose-built Runway multi-shot master
+  // Render a continuity-locked Runway multi-shot video
   const handleRenderRunwayVideo = async () => {
     if (!selectedPost) return;
     setIsRenderingVideo(true);
-    setVideoStatusMsg("Submitting a quality-first multi-shot production to Runway...");
+    setVideoStatusMsg("Planning three continuity-locked shots for Runway...");
 
     try {
       const promptText = selectedPost.videoScriptPrompt || selectedPost.content || "B2B software workflow demo";
@@ -294,7 +306,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
       }
 
       const taskId = data.taskId;
-      setVideoStatusMsg("Rendering a 15-second multi-shot video with integrated sound...");
+      setVideoStatusMsg("Rendering and assembling a 15-second Runway video...");
 
       const soundTaskId = data.integratedAudio ? null : undefined;
 
@@ -351,7 +363,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
       const res = await apiFetch("/api/social-campaigns/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: selectedPost.imagePrompt })
+        body: JSON.stringify({ prompt: selectedPost.imagePrompt, platform: selectedPost.platform })
       });
 
       const data = await res.json();
@@ -723,6 +735,11 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                   <label className="text-[10px] font-mono uppercase font-bold text-teal-300">
                     Post Draft & Free Value Copy
                   </label>
+                  {selectedPost.proofBasis && (
+                    <span className="rounded border border-cyan-400/30 bg-cyan-950/40 px-2 py-0.5 text-[8px] font-mono uppercase text-cyan-200">
+                      Proof: {selectedPost.proofBasis}
+                    </span>
+                  )}
                   <span className="text-[10px] font-mono text-teal-400/80">
                     {selectedPost.content.length} characters
                   </span>
@@ -765,6 +782,31 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                       placeholder="Image prompt for diagram / infographic..."
                       className="w-full h-[70px] p-2 bg-[#022421] border border-teal-500/40 rounded-lg text-[10px] font-mono text-teal-200 resize-none"
                     />
+
+                    {selectedPost.visualReferences && selectedPost.visualReferences.length > 0 && (
+                      <div className="space-y-1 rounded-lg border border-amber-500/25 bg-amber-950/20 p-2">
+                        <div className="text-[8px] font-mono uppercase text-amber-300">Public-domain research references — verify before use</div>
+                        {selectedPost.visualReferences.map((reference, index) => (
+                          <div key={`${reference.sourceUrl}-${index}`} className="flex min-w-0 items-center gap-1 text-[9px]">
+                            <a
+                              href={reference.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="min-w-0 flex-1 truncate text-amber-100 hover:text-white"
+                              title="Research inspiration only; PAC generates a materially original composition"
+                            >
+                              {reference.title}{reference.creator ? ` · ${reference.creator}` : ""} ↗
+                            </a>
+                            {reference.licenseUrl ? (
+                              <a href={reference.licenseUrl} target="_blank" rel="noopener noreferrer" className="shrink-0 text-amber-300 hover:text-white">
+                                {reference.license}
+                              </a>
+                            ) : <span className="shrink-0 text-amber-300">{reference.license}</span>}
+                          </div>
+                        ))}
+                        <p className="text-[8px] leading-relaxed text-amber-200/60">PAC does not copy these pixels or compositions. They are provenance-linked research only.</p>
+                      </div>
+                    )}
 
                     {/* Clickable Graphic Preview with Zoom Overlay */}
                     <div 

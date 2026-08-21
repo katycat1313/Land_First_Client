@@ -17,6 +17,9 @@ import {
   apiCache
 } from "./server/db";
 import { GIVEAWAY_BLUEPRINTS, formatGiveawayBlueprintsForPrompt, selectGiveawayBlueprints } from "./server/giveawayBlueprints";
+import { LOCAL_BUSINESS_CATEGORIES, scanGooglePlaces } from "./server/googlePlaces";
+import { formatSocialPlatformProfilesForPrompt, getSocialPlatformProfile } from "./server/socialPlatformProfiles";
+import { findOpenVisualReferences } from "./server/visualReferences";
 
 import {
   generateUnifiedLLM,
@@ -927,6 +930,27 @@ app.get("/api/llm/config", (req, res) => {
     useSlingshot: llmConfig.useSlingshot,
     hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
+});
+
+// Live Google Places prospect signals. Results are deliberately not persisted or cached.
+app.get("/api/local-prospects/categories", (_req, res) => {
+  res.set("Cache-Control", "no-store").json(LOCAL_BUSINESS_CATEGORIES);
+});
+
+app.post("/api/local-prospects/scan", async (req, res) => {
+  try {
+    const results = await scanGooglePlaces(req.body || {});
+    res.set("Cache-Control", "no-store").json({
+      success: true,
+      scannedAt: new Date().toISOString(),
+      freshnessWindowDays: 14,
+      storagePolicy: "Live Google Places content is not saved by the application.",
+      attribution: "Google Maps",
+      results
+    });
+  } catch (error: any) {
+    res.status(400).set("Cache-Control", "no-store").json({ error: error.message || "Google Places scan failed." });
+  }
 });
 
 app.post("/api/llm/config", (req, res) => {
@@ -4105,9 +4129,21 @@ app.get("/api/social-campaigns", (req, res) => {
 app.post("/api/social-campaigns/generate", async (req, res) => {
   try {
     const opportunities = loadOpportunities();
+    const freshnessCutoff = Date.now() - (14 * 24 * 60 * 60 * 1000);
     const activeOppsSummary = opportunities
+      .filter(o => {
+        const timestamp = Date.parse(String(o.timestamp || ""));
+        return Number.isFinite(timestamp) && timestamp >= freshnessCutoff && timestamp <= Date.now();
+      })
       .slice(0, 5)
-      .map(o => `- ${o.title} (Industry: ${o.industry}, Pain: ${o.problemSummary})`)
+      .map(o => [
+        `- ${o.title}`,
+        `Industry: ${o.industry || "Unknown"}`,
+        `Problem: ${o.problemSummary || "Not summarized"}`,
+        `Evidence: ${o.evidence || "No quotation available"}`,
+        `Source: ${o.sourceUrl || o.originalSourceLink || "No source URL available"}`,
+        `Detected: ${o.timestamp}`
+      ].join(" | "))
       .join("\n");
 
     const systemPrompt = `
@@ -4115,12 +4151,12 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
       Your mission is to generate an authentic, data-backed 7-day thought leadership campaign that builds immediate trust, captures followers, and drives high-intent organic inbound traffic to our solution platform (missedrevenue.org).
 
       DATA-BACKED VIRAL GROWTH FRAMEWORKS (7-Day Strategic Arc):
-      - Day 1 (The Operational Teardown): Break down a costly operational bottleneck (e.g. lost contractor leads, manual CSV syncs, agency reporting hell) with a realistic dollar cost ($2k-$5k/mo wasted).
+      - Day 1 (The Operational Teardown): Break down a costly operational bottleneck using recent source evidence. Include money or time calculations only as transparent worked estimates with every assumption stated; never present an estimate as an observed loss.
       - Day 2 (The 3-Step Free Blueprint): Give away the complete, step-by-step automation recipe or webhook logic. Zero paywall. Build authority through radical transparency.
-      - Day 3 (The Contrarian Take / Common Trap): Expose why bloated $300/mo enterprise SaaS is overkill when a nimble 15-line script or custom automation solves it in 1 hour.
+      - Day 3 (The Contrarian Take / Common Trap): Explain when a focused workflow may fit a small business better than a broad software suite. Do not invent software prices, line counts, build times, or guaranteed savings.
       - Day 4 (The Visual Cheat Sheet & Infographic): A high-utility breakdown accompanied by a clean, modern workflow diagram prompt.
-      - Day 5 (The Real Transformation Story): Share an authentic founder story of cutting 8+ hours of weekly busywork by connecting a simple database to automated alerts.
-      - Day 6 (The 30-Second Loom Demo): A punchy, conversational screen-share walkthrough demonstrating how the automation works live.
+      - Day 5 (Evidence-Based Transformation): Use only a transformation explicitly supported by a real source in the active opportunities. If no verified before/after story exists, publish a transparent worked example labeled as a hypothetical workflow and do not invent a founder, customer, quote, timeline, or result.
+      - Day 6 (Proof of Work): Demonstrate a real project or runnable prototype only when project evidence is supplied. Otherwise walk through a clearly labeled concept, wireframe, or proposed workflow and say it has not yet been implemented for a client.
       - Day 7 (The Community Spark / Question): An engaging, open question asking operators to share their single most tedious manual task.
 
       ORGANIC TRAFFIC & ENGAGEMENT MECHANICS:
@@ -4129,10 +4165,27 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
       - Natural Soft CTA: Direct interested readers naturally to grab the free workflow or explore automated fixes on missedrevenue.org.
       - ZERO AI BUZZWORDS: Speak casually off the cuff like a seasoned technical operator. Strictly ban "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "in today's fast-paced world".
       - Strictly NO markdown bold asterisks (**) in the post text for clean cross-platform copying.
+      - AUTHENTICITY: Never invent a customer, founder conversation, testimonial, deployment, measured result, dollar loss, time saving, or case study. Distinguish verified source evidence from estimates and clearly label estimates. If the available evidence does not support a claim, omit it.
+      - CLIENT-HISTORY HONESTY: The founder does not yet have prior client case studies. Never use phrases such as "our clients," "a client of ours," "we helped a business," or any wording that implies previous paid engagements unless verified client evidence is explicitly supplied in the request.
+      - TRUST WITHOUT CASE STUDIES: Build authority through source-backed problem analysis, useful blueprints, transparent calculations, build-in-progress notes, wireframes, architecture decisions, and working product demonstrations that are actually supplied. Never claim a proposed solution has already been built or tested.
+      - OUTCOME LANGUAGE: Use "could," "may," "is designed to," or "here is how I would build it" for unverified outcomes. Explain the mechanism that may create the benefit and name the variables that would determine the real result. Never use "proven," "shown to," or "guaranteed" without a named, linked source that directly supports the exact claim.
+      - AUDIENCE LABELS: Call the target audience businesses, owners, operators, contractors, or teams—not clients—until a real engagement exists.
+
+      PLATFORM-SPECIFIC RULES:
+      ${formatSocialPlatformProfilesForPrompt()}
+      Never reuse identical copy across platforms. Adapt structure, length, opening, CTA, and visual direction to the selected platform.
+
+      PREMIUM VISUAL DIRECTION:
+      - Write imagePrompt as one polished editorial scene, photographed or rendered as a believable real-world moment. Favor a strong visual metaphor over a dashboard, flowchart, checklist, or collage.
+      - Use one hero subject, one environment, and one supporting action. The concept must read instantly at phone-feed size.
+      - Do not request words, labels, captions, logos, interface copy, charts, tiny icons, split-screen comparisons, or dense infographics inside the generated image. The post caption carries the information; the image earns attention.
+      - Write each video block as one filmable shot with a single subject action, a single camera move, and a consistent location, lighting treatment, wardrobe/object identity, and color palette across all three shots.
+      - Do not request screen recordings, readable software interfaces, talking-head lip sync, or transformations. Show the business problem and result through physical, cinematic action.
+      - Include visualReferenceQuery containing 3-6 concrete search terms for finding a public-domain visual reference. It is research inspiration only, never an instruction to copy a composition or identifiable creative expression.
     `;
 
     const prompt = `
-      Based on our current real-world B2B operational opportunities:\n${activeOppsSummary || "Focus on HVAC contractor instant lead dispatch, marketing agency client reporting automation, and e-commerce inventory sync."}
+      Based only on these current real-world B2B operational opportunities from the last 14 days:\n${activeOppsSummary || "No qualifying recent opportunity evidence is available. Create source-neutral educational posts about how to diagnose operational bottlenecks. Do not present a specific business problem, statistic, quotation, or outcome as observed fact."}
       
       Generate a comprehensive, high-converting 7-day organic thought leadership campaign starting from today (${new Date().toISOString().split("T")[0]}).
       
@@ -4141,8 +4194,10 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
         "id": "post_1",
         "platform": "LinkedIn",
         "scheduledDate": "YYYY-MM-DD",
+        "proofBasis": "source-backed analysis | transparent worked example | build in progress | working project demo",
         "content": "Full post text with scroll-stopping hook, practical step-by-step value, and natural soft CTA...",
-        "imagePrompt": "Detailed prompt for generating a clean, modern, minimalist B2B workflow infographic, architecture diagram, or UI dashboard graphic...",
+        "imagePrompt": "Detailed prompt for one original premium editorial scene with a clear subject, environment, action, composition, lighting, and palette; no text or interface...",
+        "visualReferenceQuery": "3-6 concrete public-domain image search terms",
         "videoScriptPrompt": "30-second casual Loom / Reel walkthrough script outline...",
         "videoBlocks": [
           { "prompt": "Opening hook shot with one clear action and camera direction", "duration": 5 },
@@ -4164,15 +4219,22 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
 
     const parsed = safeParseJSON(rawResult || "[]");
     if (Array.isArray(parsed) && parsed.length > 0) {
-      const openaiKey = process.env.OPENAI_API_KEY;
-      let updatedPosts = parsed;
-      if (openaiKey) {
-        console.log(`[Social Campaigns] Pre-generating recognizable campaign visuals...`);
+      const postsWithReferences = await Promise.all(parsed.map(async (post: any) => ({
+        ...post,
+        visualReferences: await findOpenVisualReferences(
+          post.visualReferenceQuery || String(post.imagePrompt || "small business owner workspace").split(/[,.]/)[0],
+          2
+        )
+      })));
+      const runwayKey = process.env.RUNWAY_API_KEY;
+      let updatedPosts = postsWithReferences;
+      if (runwayKey) {
+        console.log(`[Social Campaigns] Pre-generating campaign visuals with Runway Gen-4 Image...`);
         updatedPosts = await Promise.all(
-          parsed.map(async (post: any) => {
+          postsWithReferences.map(async (post: any) => {
             if (post.imagePrompt) {
               try {
-                const imageUrl = await generateSocialCampaignImage(post.imagePrompt, "medium");
+                const imageUrl = await generateSocialCampaignImage(post.imagePrompt, "high", post.platform);
                 return { ...post, imageUrl };
               } catch (imgErr) {
                 console.error(`[Social Campaigns] Failed to pre-generate image for post ${post.id}:`, imgErr);
@@ -4182,9 +4244,9 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
           })
         );
       } else {
-        // Keep the authored prompt, but never pretend a low-quality third-party
-        // placeholder is the final campaign asset.
-        updatedPosts = parsed.map((post: any) => ({ ...post, imageUrl: "" }));
+        // Keep the authored prompt, but never pretend a placeholder is the
+        // final campaign asset when Runway is not configured.
+        updatedPosts = postsWithReferences.map((post: any) => ({ ...post, imageUrl: "" }));
       }
       saveSocialCampaigns(updatedPosts);
       return res.json({ success: true, posts: updatedPosts });
@@ -4279,70 +4341,137 @@ const buildSocialImagePrompt = (prompt: string) => `
 Use case: ads-marketing
 Asset type: landscape social-media campaign visual
 Primary request: ${prompt.trim()}
-Composition/framing: one immediately recognizable main subject; simple left-to-right visual hierarchy; generous spacing; landscape 3:2 composition; no tiny details
-Style/medium: polished editorial illustration or crisp product-style visualization, grounded in believable real-world objects and environments
-Lighting/mood: clean natural contrast, confident and practical
-Constraints: the main subject must be clear at thumbnail size; every object must have coherent anatomy, geometry, perspective, and edges; use at most three supporting elements
-Avoid: illegible text, fake UI copy, logos, watermarks, clutter, surreal objects, distorted hands, duplicated objects, abstract glowing shapes, generic stock-art collage
+Scene/backdrop: one believable small-business environment with tangible tools, materials, and natural depth
+Subject: one immediately recognizable hero subject performing one clear action
+Style/medium: premium editorial advertising photography with realistic materials, restrained commercial art direction, and natural human detail
+Composition/framing: strong foreground subject, simple depth layers, generous negative space, feed-readable silhouette, platform-appropriate aspect ratio
+Lighting/mood: motivated natural light, cinematic but credible contrast, confident and practical mood
+Color palette: restrained slate, warm neutral, and one teal or amber accent; natural skin and material colors
+Constraints: communicate the idea entirely through the scene; crisp focal subject; coherent anatomy, geometry, perspective, and edges; at most two supporting objects; clean final-grade finish
+Avoid: any visible words or letters, captions, labels, logos, watermarks, charts, diagrams, split screens, dashboards, software interfaces, tiny icons, clutter, surreal objects, distorted hands, duplicated objects, generic stock-art collage
 `.trim();
 
 const generateSocialCampaignImage = async (
   prompt: string,
-  quality: SocialImageQuality = "high"
+  _quality: SocialImageQuality = "high",
+  platform?: string
 ): Promise<string> => {
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
-    throw new Error("OPENAI_API_KEY is not configured; no image was generated.");
+  const runwayKey = process.env.RUNWAY_API_KEY;
+  if (!runwayKey) {
+    throw new Error("RUNWAY_API_KEY is not configured; no image was generated.");
   }
 
-  const response = await fetch("https://api.openai.com/v1/images/generations", {
+  const platformProfile = getSocialPlatformProfile(platform);
+  const platformPrompt = `${buildSocialImagePrompt(prompt)}\nPlatform: ${platformProfile.name}\nPlatform visual rules: ${platformProfile.visualRules.join("; ")}`;
+  const ratio = platformProfile.imageSize === "1024x1536"
+    ? "1080:1920"
+    : platformProfile.imageSize === "1024x1024"
+      ? "1080:1080"
+      : "1920:1080";
+  const response = await fetch("https://api.dev.runwayml.com/v1/text_to_image", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${openaiKey}`,
+      "Authorization": `Bearer ${runwayKey}`,
+      "X-Runway-Version": "2024-11-06",
+      "Idempotency-Key": crypto.randomUUID(),
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
-      prompt: buildSocialImagePrompt(prompt),
-      n: 1,
-      size: "1536x1024",
-      quality,
-      output_format: "jpeg",
-      output_compression: 88
+      model: process.env.RUNWAY_IMAGE_MODEL || "gen4_image",
+      promptText: platformPrompt.slice(0, 1000),
+      ratio
     })
   });
 
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`OpenAI image generation failed (${response.status}): ${body.slice(0, 500)}`);
+    throw new Error(`Runway image generation failed (${response.status}): ${body.slice(0, 500)}`);
   }
 
-  const json: any = JSON.parse(body);
-  const image = json.data?.[0];
-  if (image?.b64_json) return `data:image/jpeg;base64,${image.b64_json}`;
-  if (image?.url) return image.url;
-  throw new Error("OpenAI returned no generated image data.");
-};
+  const task: any = JSON.parse(body);
+  if (!task.id) throw new Error("Runway returned no image task ID.");
 
-const buildRunwayMotionPrompt = (creativeDirection: string) => `
-Animate the supplied reference image as one continuous five-second shot.
-Preserve exactly: the main subject, object count, shapes, proportions, colors, composition, background, and all visible lettering.
-Motion: subtle natural environmental movement and a slow, stable camera push-in with gentle parallax.
-Creative direction: ${creativeDirection.trim()}
-Do not add a new scene or new objects. No cuts, morphing, melting, duplication, warped geometry, altered logos, rewritten text, or newly generated text. Keep the subject recognizable in every frame.
-`.trim();
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await waitForRetry(2000);
+    const statusResponse = await fetch(`https://api.dev.runwayml.com/v1/tasks/${task.id}`, {
+      headers: {
+        "Authorization": `Bearer ${runwayKey}`,
+        "X-Runway-Version": "2024-11-06"
+      }
+    });
+    const statusBody = await statusResponse.text();
+    if (!statusResponse.ok) {
+      throw new Error(`Runway image status failed (${statusResponse.status}): ${statusBody.slice(0, 500)}`);
+    }
+    const status: any = JSON.parse(statusBody);
+    if (status.status === "SUCCEEDED" && status.output?.[0]) return status.output[0];
+    if (status.status === "FAILED" || status.status === "CANCELED") {
+      throw new Error(`Runway image generation ${String(status.status).toLowerCase()}: ${status.failure || status.failureCode || "unknown error"}`);
+    }
+  }
+
+  throw new Error("Runway image generation timed out after two minutes.");
+};
 
 const waitForRetry = (milliseconds: number) =>
   new Promise(resolve => setTimeout(resolve, milliseconds));
 
+type SeamlessVideoBlock = { prompt: string; duration: number };
+
+const planSeamlessVideoBlocks = async (
+  creativeBrief: string,
+  authoredBlocks: unknown
+): Promise<{ continuityBible: string; blocks: SeamlessVideoBlock[] }> => {
+  const sourceBlocks = (Array.isArray(authoredBlocks) ? authoredBlocks : [])
+    .filter((block: any) => typeof block?.prompt === "string" && block.prompt.trim())
+    .slice(0, 5)
+    .map((block: any) => String(block.prompt).trim());
+
+  const rawPlan = await generateUnifiedLLM({
+    systemPrompt: `You are a meticulous commercial film director and continuity supervisor. Plan exactly three consecutive five-second shots that Runway can assemble into one coherent 15-second social video.
+
+CONTINUITY LOCK:
+- Define one hero subject, one exact environment, one wardrobe or material description, one key prop, one lighting direction, one color palette, and one screen direction. These facts must remain identical in all shots.
+- Each shot contains one physically believable subject action and one simple camera movement.
+- End shot 1 with an action, object position, framing, and movement that shot 2 can match. End shot 2 the same way for shot 3.
+- Begin each following shot by explicitly matching the previous ending state before continuing the action.
+- Progress through setup, useful action, and resolved result without teleportation, transformation, wardrobe changes, unexplained new objects, or location changes.
+- Do not show readable screens, interface text, captions, logos, lip sync, crowds, testimonials, dollar figures, or performance claims.
+- Describe only visible direction. Do not include editing commentary or abstract marketing language.
+
+Return strict JSON only with this structure:
+{"continuityBible":"35-70 words defining the locked visual facts","blocks":[{"prompt":"shot description including exact starting state, action, camera motion, and exact ending state","duration":5},{"prompt":"...","duration":5},{"prompt":"...","duration":5}]}`,
+    prompt: `Creative brief:\n${String(creativeBrief || "A practical small-business workflow improvement").slice(0, 1200)}\n\nAuthored shot ideas, if useful:\n${sourceBlocks.length ? sourceBlocks.join("\n") : "None"}`,
+    responseJson: true,
+    temperature: 0.15
+  });
+
+  const parsed = safeParseJSON(rawPlan || "{}");
+  const continuityBible = String(parsed?.continuityBible || "One recognizable small-business operator in one practical workspace, wearing the same neutral work clothes, using the same physical tool, with warm side light, restrained slate and amber colors, and consistent left-to-right movement.").slice(0, 420);
+  const planned = Array.isArray(parsed?.blocks) ? parsed.blocks.slice(0, 3) : [];
+  if (planned.length !== 3) {
+    throw new Error("The continuity planner did not return exactly three usable video blocks.");
+  }
+
+  const blocks = planned.map((block: any, index: number) => ({
+    prompt: `${continuityBible} Shot ${index + 1} of 3: ${String(block?.prompt || "").trim()}`.slice(0, 512),
+    duration: 5
+  }));
+  if (blocks.some(block => block.prompt.length < 40)) {
+    throw new Error("The continuity planner returned an incomplete video block.");
+  }
+
+  return { continuityBible, blocks };
+};
+
 // POST /api/social-campaigns/generate-image
 app.post("/api/social-campaigns/generate-image", async (req, res) => {
-  const { prompt } = req.body;
+  const { prompt, platform } = req.body;
   if (!prompt) return res.status(400).json({ error: "Prompt is required." });
 
   try {
-    console.log(`[Campaigns Image] Generating a high-quality landscape visual...`);
-    const imageUrl = await generateSocialCampaignImage(prompt, "high");
+    console.log(`[Campaigns Image] Generating with Runway Gen-4 Image...`);
+    const imageUrl = await generateSocialCampaignImage(prompt, "high", platform);
     res.json({ success: true, imageUrl });
   } catch (err: any) {
     console.error("[Campaigns Image Generation Error]:", err);
@@ -4352,7 +4481,7 @@ app.post("/api/social-campaigns/generate-image", async (req, res) => {
 
 // POST /api/social-campaigns/generate-video
 app.post("/api/social-campaigns/generate-video", async (req, res) => {
-  const { promptText, referenceImageUrl, duration = 15, ratio = "1920:1080", blocks } = req.body;
+  const { promptText, referenceImageUrl, ratio = "1920:1080", blocks } = req.body;
   if (!promptText && !referenceImageUrl) {
     return res.status(400).json({ error: "Prompt or reference image is required." });
   }
@@ -4363,7 +4492,7 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
   }
 
   try {
-    console.log(`[Runway Video] Planning a purpose-built multi-shot video...`);
+    console.log(`[Runway Video] Planning and assembling a continuity-locked multi-shot video...`);
     const endpoint = "https://api.dev.runwayml.com/v1/recipes/multi_shot_video";
 
     let finalPromptImage = referenceImageUrl;
@@ -4388,41 +4517,15 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
       ? "1080:1920"
       : "1920:1080";
 
-    const requestedBlocks = Array.isArray(blocks) ? blocks : [];
-    let plannedBlocks = requestedBlocks
-      .filter((block: any) => typeof block?.prompt === "string" && block.prompt.trim())
-      .slice(0, 5)
-      .map((block: any) => ({
-        prompt: block.prompt.trim().slice(0, 512),
-        duration: Math.max(2, Math.min(Number(block.duration) || 5, 8))
-      }));
-
-    if (plannedBlocks.length < 3) {
-      const rawPlan = await generateUnifiedLLM({
-        systemPrompt: `You are a meticulous commercial video director. Break one social-media idea into exactly three coherent five-second shots. The shots must serve the post's purpose, share the same subject and visual identity, and progress from hook to proof to result. Describe only visible action, camera movement, lighting, and continuity. Never invent testimonials, performance figures, customers, or product claims. Return strict JSON only.`,
-        prompt: `Create three production blocks for this video brief:\n${promptText || "A practical business workflow demonstration"}\n\nReturn: {"blocks":[{"prompt":"...","duration":5},{"prompt":"...","duration":5},{"prompt":"...","duration":5}]}`,
-        responseJson: true,
-        temperature: 0.35
-      });
-      const parsedPlan = safeParseJSON(rawPlan || "{}");
-      plannedBlocks = Array.isArray(parsedPlan?.blocks) ? parsedPlan.blocks.slice(0, 3) : [];
-    }
-
-    if (plannedBlocks.length < 3) {
-      return res.status(422).json({ error: "A professional video requires at least three valid scene blocks." });
-    }
-
-    // Runway custom multi-shot currently supports finished 5, 10, or 15 second videos.
-    // Normalize three director-approved blocks to a cohesive 15-second master.
-    plannedBlocks = plannedBlocks.slice(0, 3).map((block: any, index: number) => ({
-      prompt: `${buildRunwayMotionPrompt(String(block.prompt || promptText)).slice(0, 340)} Continuity: this is ${index === 0 ? "the opening hook" : index === 1 ? "the proof shot" : "the resolving result shot"}; preserve the same subject, palette, lighting family, and visual world across all shots.`.slice(0, 512),
-      duration: 5
-    }));
+    const videoPlan = await planSeamlessVideoBlocks(
+      String(promptText || "A practical small-business workflow improvement"),
+      blocks
+    );
 
     const payload: any = {
-      version: "unsafe-latest",
+      version: "2026-06",
       mode: "custom",
-      shots: plannedBlocks,
+      shots: videoPlan.blocks,
       firstFrame: { uri: finalPromptImage },
       duration: 15,
       ratio: validRatio,
@@ -4460,8 +4563,9 @@ app.post("/api/social-campaigns/generate-video", async (req, res) => {
       taskId: json.id,
       status: json.status || "PENDING",
       integratedAudio: true,
-      blocks: plannedBlocks,
-      modelPolicy: "runway-multi-shot:unsafe-latest"
+      continuityBible: videoPlan.continuityBible,
+      blocks: videoPlan.blocks,
+      workflow: "runway-multi-shot:2026-06"
     });
   } catch (err: any) {
     console.error("[Runway Video Error]:", err);
