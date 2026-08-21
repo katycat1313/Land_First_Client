@@ -13,5 +13,6 @@ firebase-applet-config.json
 data/*.json
 !data/.gitkeep
 .wrangler/
+supabase/.temp/
 *.code-workspace
 *.sqlite
