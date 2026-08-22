@@ -4298,6 +4298,147 @@ app.get("/api/social-campaigns", (req, res) => {
   }
 });
 
+const BUSINESS_CALENDAR_TYPES = new Set(["outreach", "follow_up", "task", "activity"]);
+const BUSINESS_CALENDAR_STATUSES = new Set(["planned", "in_progress", "done", "skipped"]);
+const BUSINESS_CALENDAR_PRIORITIES = new Set(["low", "medium", "high"]);
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeCalendarItem(input: any, source: "user" | "pac" = "user") {
+  const itemType = String(input?.itemType || input?.item_type || "task").trim();
+  const title = String(input?.title || "").trim().slice(0, 240);
+  const scheduledDate = String(input?.scheduledDate || input?.scheduled_date || "").trim();
+  const status = String(input?.status || "planned").trim();
+  const priority = String(input?.priority || "medium").trim();
+  const rawTarget = input?.targetCount ?? input?.target_count;
+  const rawCompleted = input?.completedCount ?? input?.completed_count ?? 0;
+  const targetCount = rawTarget === null || rawTarget === undefined || rawTarget === "" ? null : Number(rawTarget);
+  const completedCount = Number(rawCompleted);
+
+  if (!BUSINESS_CALENDAR_TYPES.has(itemType)) throw new Error("Invalid calendar item type.");
+  if (!title) throw new Error("Calendar title is required.");
+  if (!ISO_DATE_PATTERN.test(scheduledDate) || Number.isNaN(Date.parse(`${scheduledDate}T00:00:00Z`))) throw new Error("A valid scheduled date is required.");
+  if (!BUSINESS_CALENDAR_STATUSES.has(status)) throw new Error("Invalid calendar status.");
+  if (!BUSINESS_CALENDAR_PRIORITIES.has(priority)) throw new Error("Invalid calendar priority.");
+  if (targetCount !== null && (!Number.isInteger(targetCount) || targetCount < 1 || targetCount > 1000)) throw new Error("Target count must be between 1 and 1000.");
+  if (!Number.isInteger(completedCount) || completedCount < 0 || completedCount > 1000) throw new Error("Completed count must be between 0 and 1000.");
+
+  return {
+    item_type: itemType,
+    title,
+    description: String(input?.description || "").trim().slice(0, 4000),
+    scheduled_date: scheduledDate,
+    scheduled_time: input?.scheduledTime || input?.scheduled_time || null,
+    status,
+    priority,
+    target_count: targetCount,
+    completed_count: completedCount,
+    opportunity_id: input?.opportunityId || input?.opportunity_id || null,
+    source,
+    metadata: input?.metadata && typeof input.metadata === "object" ? input.metadata : {}
+  };
+}
+
+function serializeCalendarItem(item: any) {
+  return {
+    id: item.id,
+    itemType: item.item_type,
+    title: item.title,
+    description: item.description || "",
+    scheduledDate: item.scheduled_date,
+    scheduledTime: item.scheduled_time || undefined,
+    status: item.status,
+    priority: item.priority,
+    targetCount: item.target_count,
+    completedCount: item.completed_count || 0,
+    opportunityId: item.opportunity_id || undefined,
+    source: item.source,
+    metadata: item.metadata || {},
+    createdAt: item.created_at,
+    updatedAt: item.updated_at
+  };
+}
+
+async function applyPacCalendarActions(parsed: any) {
+  const proposed = Array.isArray(parsed?.calendarActions) ? parsed.calendarActions.slice(0, 20) : [];
+  if (proposed.length === 0) return parsed;
+  const db = getSupabase();
+  if (!db) return { ...parsed, calendarActions: [], calendarError: "Calendar database is not configured." };
+
+  const saved: any[] = [];
+  for (const action of proposed) {
+    try {
+      const record = normalizeCalendarItem(action, "pac");
+      const { data: duplicate } = await db.from("business_calendar_items").select("id")
+        .eq("item_type", record.item_type).eq("title", record.title).eq("scheduled_date", record.scheduled_date)
+        .neq("status", "skipped").limit(1).maybeSingle();
+      if (duplicate) continue;
+      const { data, error } = await db.from("business_calendar_items").insert(record).select("*").single();
+      if (error) throw error;
+      saved.push(serializeCalendarItem(data));
+    } catch (error: any) {
+      console.warn("[P.A.C. Calendar] Skipped invalid calendar action:", error.message || error);
+    }
+  }
+  return { ...parsed, calendarActions: saved };
+}
+
+app.get("/api/business-calendar", async (req, res) => {
+  try {
+    const db = getSupabase();
+    if (!db) return res.status(503).json({ error: "Calendar database is not configured." });
+    const start = String(req.query.start || "");
+    const end = String(req.query.end || "");
+    let query = db.from("business_calendar_items").select("*").order("scheduled_date", { ascending: true }).order("scheduled_time", { ascending: true });
+    if (ISO_DATE_PATTERN.test(start)) query = query.gte("scheduled_date", start);
+    if (ISO_DATE_PATTERN.test(end)) query = query.lte("scheduled_date", end);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json((data || []).map(serializeCalendarItem));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to load business calendar." });
+  }
+});
+
+app.post("/api/business-calendar", async (req, res) => {
+  try {
+    const db = getSupabase();
+    if (!db) return res.status(503).json({ error: "Calendar database is not configured." });
+    const record = normalizeCalendarItem(req.body, "user");
+    const { data, error } = await db.from("business_calendar_items").insert(record).select("*").single();
+    if (error) throw error;
+    res.status(201).json(serializeCalendarItem(data));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to create calendar item." });
+  }
+});
+
+app.patch("/api/business-calendar/:id", async (req, res) => {
+  try {
+    const db = getSupabase();
+    if (!db) return res.status(503).json({ error: "Calendar database is not configured." });
+    const { data: existing, error: findError } = await db.from("business_calendar_items").select("*").eq("id", req.params.id).single();
+    if (findError || !existing) return res.status(404).json({ error: "Calendar item not found." });
+    const record = normalizeCalendarItem({ ...existing, ...req.body }, existing.source === "pac" ? "pac" : "user");
+    const { data, error } = await db.from("business_calendar_items").update({ ...record, updated_at: new Date().toISOString() }).eq("id", req.params.id).select("*").single();
+    if (error) throw error;
+    res.json(serializeCalendarItem(data));
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "Failed to update calendar item." });
+  }
+});
+
+app.delete("/api/business-calendar/:id", async (req, res) => {
+  try {
+    const db = getSupabase();
+    if (!db) return res.status(503).json({ error: "Calendar database is not configured." });
+    const { error } = await db.from("business_calendar_items").delete().eq("id", req.params.id);
+    if (error) throw error;
+    res.status(204).end();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to remove calendar item." });
+  }
+});
+
 // POST /api/social-campaigns/generate
 app.post("/api/social-campaigns/generate", async (req, res) => {
   try {
@@ -5176,6 +5317,21 @@ app.post("/api/pac/chat", async (req, res) => {
       .filter((entry: any) => entry?.id !== PAC_CONVERSATION_SNAPSHOT_ID)
       .slice(0, 20)
       .map((entry: any) => ({ timestamp: entry.timestamp, tag: entry.tag, note: entry.note, prospect: entry.prospect }));
+    let upcomingCalendar: any[] = [];
+    try {
+      const db = getSupabase();
+      if (db) {
+        const today = new Date().toISOString().slice(0, 10);
+        const horizon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const { data, error } = await db.from("business_calendar_items").select("*")
+          .gte("scheduled_date", today).lte("scheduled_date", horizon)
+          .order("scheduled_date", { ascending: true }).limit(100);
+        if (error) throw error;
+        upcomingCalendar = (data || []).map(serializeCalendarItem);
+      }
+    } catch (error: any) {
+      console.warn("[P.A.C. Chat] Business calendar context unavailable:", error.message || error);
+    }
 
     // Compile P.A.C. Core Instructions & Business Partner Persona
     const pacSystemPrompt = `
@@ -5358,6 +5514,12 @@ Personalization learned from explicit discussions: ${JSON.stringify(conversation
 Recent memory entries: ${JSON.stringify(memoryEntries, null, 2)}
 Pending follow-ups: ${JSON.stringify((persistentMemory.followUps || []).filter((task: any) => !task.completed).slice(0, 20), null, 2)}
 
+[SHARED BUSINESS CALENDAR]
+Today is ${new Date().toISOString().slice(0, 10)}. Upcoming calendar items: ${JSON.stringify(upcomingCalendar, null, 2)}
+- You may add outreach targets, follow-ups, tasks, and business activities by returning calendarActions in the structured response.
+- Only add items when your partner explicitly asks you to plan or schedule them, or clearly authorizes you to manage the calendar. Never invent completed work, prospect contact, or results.
+- Every calendar action needs itemType, title, and scheduledDate in YYYY-MM-DD format. Use targetCount for measurable outreach goals. Avoid duplicates and focus the plan on landing Client #1.
+
 [CURRENT ACTIVE PIPELINE / OPPORTUNITIES]
 Use this list of active leads to inform your advice or outreach suggestions:
 ${JSON.stringify(opportunities || [], null, 2)}
@@ -5392,7 +5554,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
           } else {
             parsed.actions.unshift("⚡ Processed via G14/Mac Ollama Qwen2.5 Local LLM");
           }
-          return res.json(parsed);
+          return res.json(await applyPacCalendarActions(parsed));
         }
       } catch (ollamaErr: any) {
         console.warn(`[P.A.C. Chat] Ollama attempt failed: ${ollamaErr.message}. ${llmConfig.provider === "ollama" ? "Attempting Gemini fallback..." : "Proceeding to Gemini..."}`);
@@ -5480,6 +5642,24 @@ ${JSON.stringify(computerLogs || [], null, 2)}
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
                     description: "Simulated computer-use tasks or background execution actions you are performing autonomously."
+                  },
+                  calendarActions: {
+                    type: Type.ARRAY,
+                    description: "Calendar items to create only when the user explicitly asks P.A.C. to plan or schedule work.",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        itemType: { type: Type.STRING, enum: ["outreach", "follow_up", "task", "activity"] },
+                        title: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        scheduledDate: { type: Type.STRING },
+                        scheduledTime: { type: Type.STRING },
+                        priority: { type: Type.STRING, enum: ["low", "medium", "high"] },
+                        targetCount: { type: Type.INTEGER },
+                        opportunityId: { type: Type.STRING }
+                      },
+                      required: ["itemType", "title", "scheduledDate"]
+                    }
                   }
                 },
                 required: ["response"]
@@ -5518,7 +5698,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
           });
           const parsed = safeParseJSON(openAiResult);
           if (parsed && parsed.response) {
-            return res.json(parsed);
+            return res.json(await applyPacCalendarActions(parsed));
           }
         } catch (openaiErr: any) {
           console.error("[P.A.C. Chat] OpenAI fallback failed:", openaiErr);
@@ -5534,7 +5714,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
 
     const outputText = response.text;
     const parsed = safeParseJSON(outputText) || { response: outputText, actions: [] };
-    res.json(parsed);
+    res.json(await applyPacCalendarActions(parsed));
   } catch (err: any) {
     console.error("Error in P.A.C. endpoint:", err);
     const errStr = String(err?.message || err) + JSON.stringify(err || {});

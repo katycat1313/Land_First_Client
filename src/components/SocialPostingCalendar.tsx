@@ -52,6 +52,27 @@ export interface SocialPost {
   notes?: string;
 }
 
+type BusinessItemType = "outreach" | "follow_up" | "task" | "activity";
+
+interface BusinessCalendarItem {
+  id: string;
+  itemType: BusinessItemType;
+  title: string;
+  description?: string;
+  scheduledDate: string;
+  scheduledTime?: string;
+  status: "planned" | "in_progress" | "done" | "skipped";
+  priority: "low" | "medium" | "high";
+  targetCount?: number | null;
+  completedCount: number;
+  source: "user" | "pac" | "system";
+}
+
+const localDateString = (date = new Date()) => {
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
+};
+
 interface SocialPostingCalendarProps {
   onAskPac?: (instruction: string) => void;
 }
@@ -65,6 +86,19 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
   const [isNewPostModalOpen, setIsNewPostModalOpen] = useState(false);
   const [newPostDate, setNewPostDate] = useState<string>("");
+  const [businessItems, setBusinessItems] = useState<BusinessCalendarItem[]>([]);
+  const [selectedBusinessDate, setSelectedBusinessDate] = useState(localDateString());
+  const [isBusinessModalOpen, setIsBusinessModalOpen] = useState(false);
+  const [calendarError, setCalendarError] = useState("");
+  const [businessDraft, setBusinessDraft] = useState({
+    itemType: "outreach" as BusinessItemType,
+    title: "",
+    description: "",
+    scheduledDate: localDateString(),
+    scheduledTime: "",
+    priority: "high" as "low" | "medium" | "high",
+    targetCount: 5
+  });
 
   // Video generation states
   const [isRenderingVideo, setIsRenderingVideo] = useState(false);
@@ -133,9 +167,71 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     }
   };
 
+  const fetchBusinessItems = async () => {
+    try {
+      const rangeStart = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, "0")}-01`;
+      const rangeEnd = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, "0")}-${String(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
+      const res = await apiFetch(`/api/business-calendar?start=${rangeStart}&end=${rangeEnd}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not load the business calendar.");
+      setBusinessItems(Array.isArray(data) ? data : []);
+      setCalendarError("");
+    } catch (error: any) {
+      setCalendarError(error.message || "Could not load the business calendar.");
+    }
+  };
+
   useEffect(() => {
     fetchPosts();
   }, []);
+
+  useEffect(() => {
+    fetchBusinessItems();
+    const refresh = () => fetchBusinessItems();
+    window.addEventListener("pac-calendar-updated", refresh);
+    return () => window.removeEventListener("pac-calendar-updated", refresh);
+  }, [currentDate]);
+
+  const openBusinessItemForm = (date: string) => {
+    setSelectedBusinessDate(date);
+    setBusinessDraft({ itemType: "outreach", title: "", description: "", scheduledDate: date, scheduledTime: "", priority: "high", targetCount: 5 });
+    setIsBusinessModalOpen(true);
+  };
+
+  const saveBusinessItem = async () => {
+    if (!businessDraft.title.trim()) return setCalendarError("Add a clear title for this calendar item.");
+    try {
+      const payload = {
+        ...businessDraft,
+        targetCount: businessDraft.itemType === "outreach" ? Number(businessDraft.targetCount) : null
+      };
+      const res = await apiFetch("/api/business-calendar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save this item.");
+      setBusinessItems(prev => [...prev, data]);
+      setIsBusinessModalOpen(false);
+      setCalendarError("");
+    } catch (error: any) {
+      setCalendarError(error.message || "Could not save this item.");
+    }
+  };
+
+  const updateBusinessItem = async (item: BusinessCalendarItem, changes: Partial<BusinessCalendarItem>) => {
+    try {
+      const res = await apiFetch(`/api/business-calendar/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changes) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not update this item.");
+      setBusinessItems(prev => prev.map(current => current.id === item.id ? data : current));
+    } catch (error: any) {
+      setCalendarError(error.message || "Could not update this item.");
+    }
+  };
+
+  const deleteBusinessItem = async (item: BusinessCalendarItem) => {
+    if (!confirm(`Remove “${item.title}” from the calendar?`)) return;
+    const res = await apiFetch(`/api/business-calendar/${item.id}`, { method: "DELETE" });
+    if (res.ok) setBusinessItems(prev => prev.filter(current => current.id !== item.id));
+  };
 
   // Calendar month arithmetic
   const year = currentDate.getFullYear();
@@ -186,8 +282,8 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
   // Export iCalendar .ics file
   const handleExportIcs = () => {
-    if (posts.length === 0) {
-      alert("No scheduled posts to export.");
+    if (posts.length === 0 && businessItems.length === 0) {
+      alert("No scheduled business items or posts to export.");
       return;
     }
 
@@ -195,7 +291,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     const now = new Date();
     const dtstamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}00Z`;
 
-    const events = posts.map((post, idx) => {
+    const postEvents = posts.map((post, idx) => {
       const dateStr = post.scheduledDate ? post.scheduledDate.replace(/-/g, "") : "20260818";
       const dtstart = `${dateStr}T140000Z`; // Default 10:00 AM EDT
       const dtend = `${dateStr}T143000Z`;
@@ -217,7 +313,31 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
         "END:VALARM",
         "END:VEVENT"
       ].join("\r\n");
-    }).join("\r\n");
+    });
+
+    const businessEvents = businessItems.map((item, idx) => {
+      const dateStr = item.scheduledDate.replace(/-/g, "");
+      const timeStr = (item.scheduledTime || "09:00").replace(":", "").slice(0, 4);
+      const endHour = String(Math.min(23, Number(timeStr.slice(0, 2)) + 1)).padStart(2, "0");
+      const cleanDescription = (item.description || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+      return [
+        "BEGIN:VEVENT",
+        `UID:business-${item.id || idx}@missedrevenue.org`,
+        `DTSTAMP:${dtstamp}`,
+        `DTSTART:${dateStr}T${timeStr}00`,
+        `DTEND:${dateStr}T${endHour}${timeStr.slice(2)}00`,
+        `SUMMARY:${typeLabel[item.itemType]}: ${item.title.replace(/,/g, "\\,")}`,
+        `DESCRIPTION:${cleanDescription}`,
+        `STATUS:${item.status === "done" ? "COMPLETED" : "CONFIRMED"}`,
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        `DESCRIPTION:Business calendar reminder: ${item.title.replace(/,/g, "\\,")}`,
+        "TRIGGER:-PT15M",
+        "END:VALARM",
+        "END:VEVENT"
+      ].join("\r\n");
+    });
+    const events = [...postEvents, ...businessEvents].join("\r\n");
 
     const icsData = [
       "BEGIN:VCALENDAR",
@@ -233,7 +353,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `opportunity-radar-social-schedule-${year}-${pad(month + 1)}.ics`;
+    link.download = `opportunity-radar-business-calendar-${year}-${pad(month + 1)}.ics`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -443,13 +563,15 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
     // Filter posts on this date
     const dayPosts = posts.filter(p => p.scheduledDate === dateString);
+    const dayBusinessItems = businessItems.filter(item => item.scheduledDate === dateString);
 
     calendarCells.push({
       dayNum,
       isCurrentMonth: true,
       dateString,
       isToday,
-      posts: dayPosts
+      posts: dayPosts,
+      businessItems: dayBusinessItems
     });
   }
 
@@ -463,6 +585,19 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
     });
   }
 
+  const selectedDayItems = businessItems.filter(item => item.scheduledDate === selectedBusinessDate);
+  const selectedDayPosts = posts.filter(post => post.scheduledDate === selectedBusinessDate);
+  const selectedOutreach = selectedDayItems.filter(item => item.itemType === "outreach");
+  const outreachTarget = selectedOutreach.reduce((sum, item) => sum + (item.targetCount || 0), 0);
+  const outreachCompleted = selectedOutreach.reduce((sum, item) => sum + (item.completedCount || 0), 0);
+  const typeLabel: Record<BusinessItemType, string> = { outreach: "Outreach", follow_up: "Follow-up", task: "Task", activity: "Activity" };
+  const typeStyle: Record<BusinessItemType, string> = {
+    outreach: "bg-amber-950/80 border-amber-500/50 text-amber-200",
+    follow_up: "bg-fuchsia-950/80 border-fuchsia-500/50 text-fuchsia-200",
+    task: "bg-cyan-950/80 border-cyan-500/50 text-cyan-200",
+    activity: "bg-emerald-950/80 border-emerald-500/50 text-emerald-200"
+  };
+
   return (
     <div className="w-full max-w-7xl mx-auto space-y-6 pb-16 font-sans">
       {/* Top Banner & Action Header */}
@@ -471,19 +606,26 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-mono text-[10px] font-bold uppercase tracking-wider border border-teal-400/30 flex items-center gap-1.5">
               <Sparkles size={11} className="text-cyan-400" />
-              B2B Social Engine
+              Client #1 Command Center
             </span>
             <span className="text-[11px] text-teal-300/80 font-mono">missedrevenue.org/social-posting</span>
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight mt-1 flex items-center gap-2.5 font-mono">
-            🗓️ Social Posting & Calendar Hub
+            🗓️ Business Execution Calendar
           </h1>
           <p className="text-xs text-teal-100/70 font-mono mt-1 max-w-2xl">
-            Autonomous thought leadership planner. Schedule, edit, and publish data-backed organic content with accompanying AI graphics and Runway video clips.
+            Plan daily outreach, follow-ups, tasks, business activities, and social posts in one place. You and P.A.C. share the same live calendar.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => openBusinessItemForm(selectedBusinessDate)}
+            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black font-mono transition flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
+            type="button"
+          >
+            <Plus size={13} /> Add Business Item
+          </button>
           <button
             onClick={handleExportIcs}
             className="px-3.5 py-2 bg-[#0d4a44] hover:bg-[#115e56] text-teal-100 rounded-xl text-xs font-bold font-mono transition border border-teal-400/40 flex items-center gap-1.5 cursor-pointer shadow-lg active:scale-95"
@@ -514,6 +656,26 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
           </button>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-950/25 p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-amber-300">Outreach target · {selectedBusinessDate}</div>
+          <div className="mt-2 text-3xl font-black text-white">{outreachCompleted}<span className="text-base text-amber-200/70"> / {outreachTarget || "not set"}</span></div>
+          <p className="mt-1 text-[11px] text-amber-100/60">Personalized, high-quality conversations—not mass messages.</p>
+        </div>
+        <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-fuchsia-300">Follow-ups due</div>
+          <div className="mt-2 text-3xl font-black text-white">{selectedDayItems.filter(item => item.itemType === "follow_up" && item.status !== "done").length}</div>
+          <p className="mt-1 text-[11px] text-fuchsia-100/60">Real follow-ups scheduled for this date.</p>
+        </div>
+        <div className="rounded-2xl border border-cyan-500/30 bg-cyan-950/20 p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300">Tasks + activities + posts</div>
+          <div className="mt-2 text-3xl font-black text-white">{selectedDayItems.filter(item => item.itemType === "task" || item.itemType === "activity").length + selectedDayPosts.length}</div>
+          <p className="mt-1 text-[11px] text-cyan-100/60">Everything needed to keep Client #1 moving.</p>
+        </div>
+      </div>
+
+      {calendarError && <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 text-xs text-rose-200">{calendarError}</div>}
 
       {/* Free Social Schedulers Launcher Bar */}
       <div className="px-4 py-2.5 bg-[#04221f]/90 border border-teal-500/30 rounded-xl flex items-center justify-between text-xs font-mono text-teal-200 overflow-x-auto gap-4 shadow-sm">
@@ -610,6 +772,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
           {calendarCells.map((cell, idx) => (
             <div
               key={idx}
+              onClick={() => cell.isCurrentMonth && setSelectedBusinessDate(cell.dateString)}
               className={`p-2 min-h-[110px] transition group relative flex flex-col justify-between ${
                 !cell.isCurrentMonth
                   ? "bg-black/40 opacity-30"
@@ -634,9 +797,9 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
                 {cell.isCurrentMonth && (
                   <button
-                    onClick={() => handleAddNewOnDate(cell.dateString)}
+                    onClick={(event) => { event.stopPropagation(); openBusinessItemForm(cell.dateString); }}
                     className="opacity-0 group-hover:opacity-100 transition p-1 hover:bg-teal-800 text-teal-300 rounded cursor-pointer"
-                    title={`Schedule post for ${cell.dateString}`}
+                    title={`Add business item for ${cell.dateString}`}
                     type="button"
                   >
                     <Plus size={12} />
@@ -646,6 +809,18 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
 
               {/* Scheduled Posts on This Day */}
               <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[100px] scrollbar-none">
+                {cell.businessItems && cell.businessItems.map(item => (
+                  <div
+                    key={item.id}
+                    className={`p-1.5 rounded-lg border text-[9px] font-mono leading-tight ${typeStyle[item.itemType]} ${item.status === "done" ? "opacity-50 line-through" : ""}`}
+                    title={`${typeLabel[item.itemType]} · ${item.source === "pac" ? "Added by P.A.C." : "Added by you"}`}
+                  >
+                    <div className="flex items-center justify-between gap-1 font-bold">
+                      <span className="truncate">{item.title}</span>
+                      {item.targetCount ? <span className="shrink-0">{item.completedCount}/{item.targetCount}</span> : null}
+                    </div>
+                  </div>
+                ))}
                 {cell.posts && cell.posts.map(post => {
                   const p = (post.platform || "").toLowerCase();
                   let badgeBg = "bg-teal-900/60 border-teal-500/40 text-teal-200";
@@ -657,7 +832,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                   return (
                     <div
                       key={post.id}
-                      onClick={() => handleOpenPost(post)}
+                      onClick={(event) => { event.stopPropagation(); handleOpenPost(post); }}
                       className={`p-1.5 rounded-lg border text-[9.5px] font-mono leading-tight cursor-pointer hover:scale-[1.02] transition shadow-sm ${badgeBg}`}
                       title="Click to view & edit post draft"
                     >
@@ -673,7 +848,7 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
                 })}
               </div>
 
-              {cell.isCurrentMonth && (!cell.posts || cell.posts.length === 0) && (
+              {cell.isCurrentMonth && (!cell.posts || cell.posts.length === 0) && (!cell.businessItems || cell.businessItems.length === 0) && (
                 <div className="text-[8px] text-teal-500/30 font-mono text-center">
                   Empty
                 </div>
@@ -706,6 +881,70 @@ export const SocialPostingCalendar: React.FC<SocialPostingCalendarProps> = ({ on
           </div>
         </div>
       </div>
+
+      <div className="rounded-2xl border border-teal-500/40 bg-[#032522] p-5 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-teal-300">Daily execution list</div>
+            <h3 className="text-lg font-black text-white">{selectedBusinessDate}</h3>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => openBusinessItemForm(selectedBusinessDate)} className="rounded-lg border border-teal-400/40 bg-teal-900/60 px-3 py-2 text-xs font-bold text-teal-100 hover:bg-teal-800"><Plus size={13} className="inline mr-1" />Add item</button>
+            <button type="button" onClick={() => onAskPac?.(`Plan my business calendar for the next 7 days with realistic daily outreach targets, real follow-ups already due, and concrete activities focused on landing Client #1. Add the approved plan to my calendar.`)} disabled={!onAskPac} className="rounded-lg border border-cyan-400/40 bg-cyan-900/50 px-3 py-2 text-xs font-bold text-cyan-100 hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-40" title={onAskPac ? "Ask P.A.C. to build the week" : "Open P.A.C. chat and ask it to plan your week"}><Sparkles size={13} className="inline mr-1" />Ask P.A.C. to plan</button>
+          </div>
+        </div>
+        <div className="mt-4 space-y-2">
+          {selectedDayItems.length === 0 && selectedDayPosts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-teal-500/30 p-5 text-center text-xs text-teal-200/60">Nothing scheduled. Add a real task or ask P.A.C. in chat to plan this day.</div>
+          ) : null}
+          {selectedDayItems.map(item => (
+            <div key={item.id} className={`flex items-start gap-3 rounded-xl border p-3 ${typeStyle[item.itemType]}`}>
+              <button type="button" onClick={() => updateBusinessItem(item, { status: item.status === "done" ? "planned" : "done" })} className="mt-0.5 rounded border border-current/40 p-1" title={item.status === "done" ? "Mark planned" : "Mark done"}><Check size={13} /></button>
+              <div className="min-w-0 flex-1">
+                <div className={`text-xs font-bold ${item.status === "done" ? "line-through opacity-60" : ""}`}>{item.title}</div>
+                <div className="mt-1 text-[10px] opacity-70">{typeLabel[item.itemType]}{item.scheduledTime ? ` · ${item.scheduledTime.slice(0, 5)}` : ""} · {item.priority} priority · {item.source === "pac" ? "P.A.C." : "You"}</div>
+                {item.description && <p className="mt-1 text-[10px] opacity-75">{item.description}</p>}
+                {item.itemType === "outreach" && item.targetCount ? (
+                  <div className="mt-2 flex items-center gap-2 text-[10px]">
+                    <span>Completed</span>
+                    <input type="number" min="0" max={item.targetCount} value={item.completedCount} onChange={event => updateBusinessItem(item, { completedCount: Math.min(item.targetCount || 1000, Number(event.target.value)) })} className="w-16 rounded border border-current/30 bg-black/30 px-2 py-1 text-white" />
+                    <span>of {item.targetCount}</span>
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" onClick={() => deleteBusinessItem(item)} className="p-1 opacity-60 hover:opacity-100" title="Remove item"><Trash2 size={13} /></button>
+            </div>
+          ))}
+          {selectedDayPosts.map(post => (
+            <button key={post.id} type="button" onClick={() => handleOpenPost(post)} className="flex w-full items-center gap-3 rounded-xl border border-blue-500/30 bg-blue-950/30 p-3 text-left text-xs text-blue-100 hover:bg-blue-900/40"><Share2 size={14} /><span className="font-bold">Publish on {post.platform}</span><span className="truncate opacity-60">{post.content || "Draft post"}</span></button>
+          ))}
+        </div>
+      </div>
+
+      {isBusinessModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border-2 border-amber-500/50 bg-gradient-to-b from-[#132f2b] to-slate-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-amber-500/30 px-5 py-4">
+              <div><div className="text-[10px] font-mono uppercase text-amber-300">Business calendar</div><h3 className="font-black text-white">Add a real execution item</h3></div>
+              <button type="button" onClick={() => setIsBusinessModalOpen(false)} className="p-1 text-slate-300 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-[10px] font-mono uppercase text-teal-300">Type<select value={businessDraft.itemType} onChange={event => setBusinessDraft({ ...businessDraft, itemType: event.target.value as BusinessItemType })} className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-2 text-xs normal-case text-white"><option value="outreach">Outreach target</option><option value="follow_up">Follow-up</option><option value="task">Task</option><option value="activity">Activity</option></select></label>
+                <label className="text-[10px] font-mono uppercase text-teal-300">Date<input type="date" value={businessDraft.scheduledDate} onChange={event => setBusinessDraft({ ...businessDraft, scheduledDate: event.target.value })} className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-2 text-xs text-white" /></label>
+              </div>
+              <label className="block text-[10px] font-mono uppercase text-teal-300">Title<input value={businessDraft.title} onChange={event => setBusinessDraft({ ...businessDraft, title: event.target.value })} placeholder="Example: Send personalized outreach to qualified HVAC owners" className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-3 text-xs normal-case text-white" /></label>
+              <label className="block text-[10px] font-mono uppercase text-teal-300">Notes<textarea value={businessDraft.description} onChange={event => setBusinessDraft({ ...businessDraft, description: event.target.value })} placeholder="What needs to happen?" className="mt-1 h-20 w-full resize-y rounded-lg border border-teal-500/40 bg-[#022421] p-3 text-xs normal-case text-white" /></label>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="text-[10px] font-mono uppercase text-teal-300">Time<input type="time" value={businessDraft.scheduledTime} onChange={event => setBusinessDraft({ ...businessDraft, scheduledTime: event.target.value })} className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-2 text-xs text-white" /></label>
+                <label className="text-[10px] font-mono uppercase text-teal-300">Priority<select value={businessDraft.priority} onChange={event => setBusinessDraft({ ...businessDraft, priority: event.target.value as any })} className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-2 text-xs normal-case text-white"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+                {businessDraft.itemType === "outreach" ? <label className="text-[10px] font-mono uppercase text-teal-300">Target<input type="number" min="1" max="1000" value={businessDraft.targetCount} onChange={event => setBusinessDraft({ ...businessDraft, targetCount: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-teal-500/40 bg-[#022421] p-2 text-xs text-white" /></label> : <div />}
+              </div>
+              <button type="button" onClick={saveBusinessItem} className="w-full rounded-xl bg-amber-500 py-3 text-xs font-black text-slate-950 hover:bg-amber-400">Save to business calendar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* POP-UP MODAL: Interactive Post Editor, Visual Studio, and 1-Click Publisher */}

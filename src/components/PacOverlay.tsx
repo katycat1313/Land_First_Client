@@ -2908,6 +2908,14 @@ registerProcessor('pcm-processor', PCMProcessor);
         });
       }
 
+      if (data.calendarActions && Array.isArray(data.calendarActions) && data.calendarActions.length > 0) {
+        setComputerLogs(prev => [
+          ...prev,
+          ...data.calendarActions.map((item: any) => `[PAC-CALENDAR] Added ${item.itemType}: ${item.title} on ${item.scheduledDate}`)
+        ].slice(-50));
+        window.dispatchEvent(new CustomEvent("pac-calendar-updated", { detail: data.calendarActions }));
+      }
+
       // Speak response out loud
       speakText(pacText);
 
