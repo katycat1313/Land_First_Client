@@ -1,5 +1,7 @@
 const PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const MAX_SIGNAL_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+// Minimum number of "unclaimed proxy" signals required to label a profile as likely unclaimed
+const UNCLAIMED_SIGNAL_THRESHOLD = 3;
 
 export const LOCAL_BUSINESS_CATEGORIES = [
   "HVAC contractor",
@@ -25,6 +27,7 @@ type PlacesScanInput = {
   location: string;
   category: string;
   maxResults?: number;
+  unclaimedOnly?: boolean; // When true, only return businesses with 3+ missing owner-controlled fields
 };
 
 export type LocalBusinessSignal = {
@@ -39,6 +42,9 @@ export type LocalBusinessSignal = {
   reviewCount: number;
   photoCount: number;
   hasHours: boolean;
+  hasDescription: boolean;
+  likelyUnclaimed: boolean;      // true when 3+ owner-controlled fields are missing
+  unclaimedSignalCount: number;
   opportunityScore: number;
   reasons: string[];
   recentEvidence: Array<{
@@ -58,6 +64,7 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
 
   const location = String(input.location || "").trim();
   const category = String(input.category || "").trim();
+  const unclaimedOnly = Boolean(input.unclaimedOnly);
   if (location.length < 2) throw new Error("A city, state, or service area is required.");
   if (!LOCAL_BUSINESS_CATEGORIES.includes(category as any)) throw new Error("Choose an approved small-business category.");
 
@@ -80,7 +87,8 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
         "places.regularOpeningHours",
         "places.reviews",
         "places.businessStatus",
-        "places.primaryTypeDisplayName"
+        "places.primaryTypeDisplayName",
+        "places.editorialSummary"   // owner-written description — absent on unclaimed profiles
       ].join(",")
     },
     body: JSON.stringify({
@@ -119,13 +127,26 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
 
       const photoCount = Array.isArray(place.photos) ? place.photos.length : 0;
       const reviewCount = Number(place.userRatingCount) || 0;
+      const hasDescription = Boolean(place.editorialSummary?.text?.trim());
+
+      // Count how many owner-controlled profile fields are missing (proxy for unclaimed status)
+      const missingWebsite  = !place.websiteUri;
+      const missingPhone    = !place.nationalPhoneNumber;
+      const missingHours    = !place.regularOpeningHours?.periods?.length;
+      const missingPhotos   = photoCount <= 2;
+      const missingDesc     = !hasDescription;
+      const unclaimedSignalCount = [missingWebsite, missingPhone, missingHours, missingPhotos, missingDesc].filter(Boolean).length;
+      const likelyUnclaimed = unclaimedSignalCount >= UNCLAIMED_SIGNAL_THRESHOLD;
+
       const reasons: string[] = [];
       let score = 20;
-      if (!place.websiteUri) { reasons.push("No website listed"); score += 18; }
-      if (!place.nationalPhoneNumber) { reasons.push("No phone number listed"); score += 8; }
-      if (!place.regularOpeningHours?.periods?.length) { reasons.push("No detailed business hours"); score += 10; }
-      if (photoCount <= 2) { reasons.push(`${photoCount} useful profile photos returned`); score += 12; }
-      if (recentEvidence.length > 0) { reasons.push(`${recentEvidence.length} relevant complaint signal within 14 days`); score += 28; }
+      if (missingWebsite)  { reasons.push("No website listed"); score += 18; }
+      if (missingPhone)    { reasons.push("No phone number listed"); score += 8; }
+      if (missingHours)    { reasons.push("No detailed business hours"); score += 10; }
+      if (missingPhotos)   { reasons.push(`${photoCount} profile photos (low)`); score += 12; }
+      if (missingDesc)     { reasons.push("No owner description"); score += 12; }
+      if (likelyUnclaimed) { reasons.push(`⚠️ Likely unclaimed profile (${unclaimedSignalCount}/5 owner fields missing)`); score += 15; }
+      if (recentEvidence.length > 0) { reasons.push(`${recentEvidence.length} complaint signal within 14 days`); score += 28; }
       if (reviewCount >= 10) { reasons.push("Established customer activity"); score += 8; }
       if (reviewCount < 5) score -= 12;
 
@@ -141,11 +162,17 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
         reviewCount,
         photoCount,
         hasHours: Boolean(place.regularOpeningHours?.periods?.length),
+        hasDescription,
+        likelyUnclaimed,
+        unclaimedSignalCount,
         opportunityScore: clamp(score, 0, 100),
         reasons,
         recentEvidence
       };
     })
-    .filter((place: LocalBusinessSignal) => place.opportunityScore >= 35)
+    .filter((place: LocalBusinessSignal) => {
+      if (unclaimedOnly) return place.likelyUnclaimed && place.opportunityScore >= 35;
+      return place.opportunityScore >= 35;
+    })
     .sort((a: LocalBusinessSignal, b: LocalBusinessSignal) => b.opportunityScore - a.opportunityScore);
 }

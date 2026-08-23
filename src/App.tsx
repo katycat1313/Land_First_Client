@@ -693,7 +693,7 @@ export default function App() {
   };
 
   // Programmatic scan trigger — called by P.A.C. via SCAN_LOCAL_PROSPECTS action tag
-  const handlePacLocalProspectScan = async (location: string, category: string) => {
+  const handlePacLocalProspectScan = async (location: string, category: string, unclaimedOnly = false) => {
     setLocalProspectLocation(location);
     setLocalProspectCategory(category);
     setIsScanningLocalProspects(true);
@@ -703,7 +703,7 @@ export default function App() {
       const response = await apiFetch("/api/local-prospects/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location: location.trim(), category, maxResults: 15 })
+        body: JSON.stringify({ location: location.trim(), category, maxResults: 15, unclaimedOnly })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Local prospect scan failed.");

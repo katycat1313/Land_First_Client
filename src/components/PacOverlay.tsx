@@ -17,7 +17,7 @@ interface PacOverlayProps {
   activeView?: string;
   onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting') => void;
   onSelectOpportunity?: (opp: Opportunity | null) => void;
-  onTriggerLocalProspectScan?: (location: string, category: string) => void;
+  onTriggerLocalProspectScan?: (location: string, category: string, unclaimedOnly?: boolean) => void;
 }
 
 export default function PacOverlay({
@@ -910,13 +910,15 @@ export default function PacOverlay({
 
     // 0f. Scan Local Prospects via Google Places Action Tag
     // Syntax: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>]
-    const localScanMatch = text.match(/\[ACTION:\s*SCAN_LOCAL_PROSPECTS:\s*([^|\]]+)(?:\|\s*([^\]]+))?\]/i);
+    // Unclaimed mode: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | unclaimed]
+    const localScanMatch = text.match(/\[ACTION:\s*SCAN_LOCAL_PROSPECTS:\s*([^|\]]+)(?:\|\s*([^|\]]+))?(?:\|\s*(unclaimed))?\]/i);
     if (localScanMatch) {
       const location = localScanMatch[1].trim();
       const category = localScanMatch[2]?.trim() || "HVAC contractor";
-      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🗺️ Triggering Google Places scan for "${category}" in "${location}"...`]);
+      const unclaimedOnly = Boolean(localScanMatch[3]);
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🗺️ Triggering Google Places scan for "${category}" in "${location}"${unclaimedOnly ? " (unclaimed profiles only)" : ""}...`]);
       onNavigateView?.("bots");
-      onTriggerLocalProspectScan?.(location, category);
+      onTriggerLocalProspectScan?.(location, category, unclaimedOnly);
     }
 
     // 0g. Plan Weekly Social Campaign Action Tag
