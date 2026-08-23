@@ -2,44 +2,13 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const GLOBAL_PAC_SYSTEM_PROMPT = `Your name is P.A.C. (Partner of Autonomous Capabilities). You are an equal, highly capable AI Business Partner and Lead Sales Strategist.
-
-[CORE RULE: ACTIVE LISTENING & DIRECT RESPONSES (HIGHEST PRIORITY)]
-- When your partner speaks or asks a question, YOU MUST LISTEN CAREFULLY AND ANSWER THEIR SPECIFIC QUESTION OR TOPIC DIRECTLY.
-- NEVER ignore what your partner said. NEVER talk over them or act like you did not hear their input.
-- NEVER recite canned speeches or force an unrelated monologue when your partner asks you something else.
-- Acknowledge their point immediately, give clear, direct, and candid answers, and collaborate like an authentic business partner.
-
-[VOICE & SPEECH FORMATTING - NO ASTERISKS / NO "STAR STAR"]
-- You are a voice agent. Your responses are converted directly to audio.
-- NEVER use asterisks (*) or markdown formatting (no bold **, no bullet asterisks) because the voice synthesizer will say "star star".
-- Use clean, standard conversational English with normal punctuation.
-
-[COMMUNICATION STYLE: DIRECT, NO FLUFF, STRAIGHT SHOOTER]
-- Zero corporate fluff, zero AI buzzwords ("delve", "game-changer", "synergy", "revolutionize", "leverage", "supercharge", "unleash", "seamless").
-- Tell it like it is: candid, realistic, practical, and grounded in real revenue numbers.
-- Keep spoken turns concise (2-4 sentences max per turn) so conversations flow naturally and quickly.
-
-[PRIME DIRECTIVE: SECURING CLIENT #1 AND CLIENT #2]
-- Our primary mission is landing our first 2 paying clients and securing their 50% upfront deposits.
-- Target: Established micro-businesses (HVAC, plumbing, roofing contractors, real estate brokers, boutique marketing agencies) with 1-10 employees and active revenue who suffer from missed calls, lost leads, manual spreadsheets, or lack in-house devs.
-- Exclude: Large corporate enterprises and hospital/healthcare networks (too slow, HIPAA red tape).
-
-[OUR DELIVERY MODEL]
-- We build custom web apps, lead recapture systems, automated workflows (n8n/Zapier/Python), and voice bots using our AI Agent Fleet under human direction.
-[OUTREACH & MESSAGING DELIVERY TRUTH]
-- Reddit, LinkedIn, Twitter, and forum DMs are dispatched safely via browser deep-linking, NOT by invisible background bots pretending to be the user.
-- When you draft outreach, tell your partner: "I've drafted the message and loaded it into your Review tab. When you click Log, Approve & Launch, it copies the message to your clipboard, marks them Contacted in your CRM, and opens Reddit directly in your browser so you can review and hit send."
-- NEVER claim that background bots secretly sent private DMs from the user's personal account.
-
-[AVAILABLE TOOL FUNCTIONS]
-- list_opportunities(): Retrieves active leads from the pipeline.
-- pull_up_card(opportunity_id): Displays a lead card on screen.
-- update_opportunity_card(opportunity_id, status, notes): Updates lead status or notes.
-- trigger_lead_sweep(sector, keyword): Sweeps web for new leads (e.g. for marketing agencies or trade contractors).
-- check_crawl_status(): Checks if crawlers are currently active/running, generating cards, or idle.
-- execute_local_command(command, cwd): Executes shell commands/scripts locally.
-- plan_weekly_campaign(): Plans a 7-day organic social campaign with free workflow advice to drive inbound leads.`;
+export const GLOBAL_PAC_SYSTEM_PROMPT = `You are P.A.C., an equal AI Business Partner & Lead Sales Strategist.
+Rule 1: ACTIVE LISTENING. Acknowledge user input, answer specific questions directly, and never talk over them or recite irrelevant monologues.
+Rule 2: VOICE ONLY. Never use asterisks (*) or markdown formatting (no bold/bullets) to avoid the voice synthesizer saying "star star". Use standard punctuation.
+Rule 3: NO FLUFF. No AI buzzwords (delve, synergy, leverage, game-changer). Keep spoken turns short (2-4 sentences max).
+Rule 4: TARGETS. Focus on micro-businesses (plumbers, HVAC, agencies, real estate). Exclude healthcare/corporates.
+Rule 5: DELIVERY. We build custom MVPs, n8n/Zapier workflows, and voice bots using an AI agent fleet. DMs are sent by the user via 1-click browser deep-links, not background bots.
+Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command.`;
 
 export async function setupDeepgramAgent(apiKey: string, projectId?: string, voice?: string, forceNew?: boolean): Promise<{ success: boolean; agentId?: string; logs: string[] }> {
   const logs: string[] = [];
@@ -98,87 +67,85 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
 
               const updatePayload = {
                 name: "Partner Agent",
-                metadata: { title: "Partner Agent" },
-                config: JSON.stringify({
-                  agent: {
-                    think: {
-                      provider: { type: "open_ai", model: "gpt-4o-mini" },
-                      prompt: GLOBAL_PAC_SYSTEM_PROMPT,
-                      functions: [
-                        {
-                          name: "list_opportunities",
-                          description: "Retrieves active leads.",
-                          parameters: { type: "object", properties: {} }
-                        },
-                        {
-                          name: "pull_up_card",
-                          description: "Displays a lead card.",
-                          parameters: {
-                            type: "object",
-                            properties: {
-                              opportunity_id: { type: "string" }
-                            },
-                            required: ["opportunity_id"]
-                          }
-                        },
-                        {
-                          name: "update_opportunity_card",
-                          description: "Updates details of a specific opportunity card.",
-                          parameters: {
-                            type: "object",
-                            properties: {
-                              opportunity_id: { type: "string" },
-                              status: { type: "string" },
-                              notes: { type: "string" },
-                              contact_email: { type: "string" },
-                              estimated_deal_value: { type: "number" }
-                            },
-                            required: ["opportunity_id"]
-                          }
-                        },
-                        {
-                          name: "trigger_lead_sweep",
-                          description: "Triggers bot fleet crawlers.",
-                          parameters: { type: "object", properties: {} }
-                        },
-                        {
-                          name: "check_crawl_status",
-                          description: "Checks if bot crawlers are currently active/running, generating cards, or idle.",
-                          parameters: { type: "object", properties: {} }
-                        },
-                        {
-                          name: "execute_local_command",
-                          description: "Runs local shell command.",
-                          parameters: {
-                            type: "object",
-                            properties: {
-                              command: { type: "string" },
-                              cwd: { type: "string" }
-                            },
-                            required: ["command"]
-                          }
+                metadata: { title: "P.A.C. Partner Agent" },
+                config: {
+                  think: {
+                    provider: { type: "google", model: "gemini-2.5-flash" },
+                    prompt: GLOBAL_PAC_SYSTEM_PROMPT,
+                    functions: [
+                      {
+                        name: "list_opportunities",
+                        description: "Retrieves active leads.",
+                        parameters: { type: "object", properties: {} }
+                      },
+                      {
+                        name: "pull_up_card",
+                        description: "Displays a lead card.",
+                        parameters: {
+                          type: "object",
+                          properties: {
+                            opportunity_id: { type: "string" }
+                          },
+                          required: ["opportunity_id"]
                         }
-                      ]
-                    },
-                    listen: {
-                      provider: {
-                        type: "deepgram",
-                        version: "v2",
-                        model: "flux-general-en",
-                        eot_threshold: 0.7,
-                        eager_eot_threshold: 0.4
+                      },
+                      {
+                        name: "update_opportunity_card",
+                        description: "Updates details of a specific opportunity card.",
+                        parameters: {
+                          type: "object",
+                          properties: {
+                            opportunity_id: { type: "string" },
+                            status: { type: "string" },
+                            notes: { type: "string" },
+                            contact_email: { type: "string" },
+                            estimated_deal_value: { type: "number" }
+                          },
+                          required: ["opportunity_id"]
+                        }
+                      },
+                      {
+                        name: "trigger_lead_sweep",
+                        description: "Triggers bot fleet crawlers.",
+                        parameters: { type: "object", properties: {} }
+                      },
+                      {
+                        name: "check_crawl_status",
+                        description: "Checks if bot crawlers are currently active/running, generating cards, or idle.",
+                        parameters: { type: "object", properties: {} }
+                      },
+                      {
+                        name: "execute_local_command",
+                        description: "Runs local shell command.",
+                        parameters: {
+                          type: "object",
+                          properties: {
+                            command: { type: "string" },
+                            cwd: { type: "string" }
+                          },
+                          required: ["command"]
+                        }
                       }
-                    },
-                    speak: {
-                      provider: {
-                        type: "deepgram",
-                        model: voice || "aura-2-jupiter-en",
-                        ...((voice || "aura-2-jupiter-en").startsWith("flux-") ? { version: "v2" } : {})
-                      }
-                    },
-                    greeting: "Hey, I'm here. What's on your mind?"
-                  }
-                })
+                    ]
+                  },
+                  listen: {
+                    provider: {
+                      type: "deepgram",
+                      version: "v2",
+                      model: "flux-general-en",
+                      eot_threshold: 0.5,
+                      eager_eot_threshold: 0.3
+                    }
+                  },
+                  speak: {
+                    provider: {
+                      type: "deepgram",
+                      model: voice || "aura-2-jupiter-en",
+                      ...((voice || "aura-2-jupiter-en").startsWith("flux-") ? { version: "v2" } : {})
+                    }
+                  },
+                  greeting: "Hey, I'm here. What's on your mind?"
+                }
               };
 
               const putRes = await fetch(`https://api.deepgram.com/v1/projects/${pid}/agents/${agentIdToUse}`, {
@@ -213,87 +180,85 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
         const cleanVoice = voice || "aura-2-jupiter-en";
         const createPayload = {
           name: "Partner Agent",
-          metadata: { title: "Partner Agent" },
-          config: JSON.stringify({
-            agent: {
-              think: {
-                provider: { type: "open_ai", model: "gpt-4o-mini" },
-                prompt: GLOBAL_PAC_SYSTEM_PROMPT,
-                functions: [
-                  {
-                    name: "list_opportunities",
-                    description: "Retrieves active leads.",
-                    parameters: { type: "object", properties: {} }
-                  },
-                  {
-                    name: "pull_up_card",
-                    description: "Displays a lead card.",
-                    parameters: {
-                      type: "object",
-                      properties: {
-                        opportunity_id: { type: "string" }
-                      },
-                      required: ["opportunity_id"]
-                    }
-                  },
-                  {
-                    name: "update_opportunity_card",
-                    description: "Updates a lead card.",
-                    parameters: {
-                      type: "object",
-                      properties: {
-                        opportunity_id: { type: "string" },
-                        status: { type: "string" },
-                        notes: { type: "string" },
-                        contact_email: { type: "string" },
-                        estimated_deal_value: { type: "number" }
-                      },
-                      required: ["opportunity_id"]
-                    }
-                  },
-                  {
-                    name: "trigger_lead_sweep",
-                    description: "Triggers bot crawlers.",
-                    parameters: { type: "object", properties: {} }
-                  },
-                  {
-                    name: "check_crawl_status",
-                    description: "Checks if bot crawlers are currently active/running, generating cards, or idle.",
-                    parameters: { type: "object", properties: {} }
-                  },
-                  {
-                    name: "execute_local_command",
-                    description: "Runs shell command.",
-                    parameters: {
-                      type: "object",
-                      properties: {
-                        command: { type: "string" },
-                        cwd: { type: "string" }
-                      },
-                      required: ["command"]
-                    }
+          metadata: { title: "P.A.C. Partner Agent" },
+          config: {
+            think: {
+              provider: { type: "google", model: "gemini-2.5-flash" },
+              prompt: GLOBAL_PAC_SYSTEM_PROMPT,
+              functions: [
+                {
+                  name: "list_opportunities",
+                  description: "Retrieves active leads.",
+                  parameters: { type: "object", properties: {} }
+                },
+                {
+                  name: "pull_up_card",
+                  description: "Displays a lead card.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      opportunity_id: { type: "string" }
+                    },
+                    required: ["opportunity_id"]
                   }
-                ]
-              },
-              listen: {
-                provider: {
-                  type: "deepgram",
-                  version: "v2",
-                  model: "flux-general-en",
-                  eot_threshold: 0.7,
-                  eager_eot_threshold: 0.4
+                },
+                {
+                  name: "update_opportunity_card",
+                  description: "Updates a lead card.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      opportunity_id: { type: "string" },
+                      status: { type: "string" },
+                      notes: { type: "string" },
+                      contact_email: { type: "string" },
+                      estimated_deal_value: { type: "number" }
+                    },
+                    required: ["opportunity_id"]
+                  }
+                },
+                {
+                  name: "trigger_lead_sweep",
+                  description: "Triggers bot crawlers.",
+                  parameters: { type: "object", properties: {} }
+                },
+                {
+                  name: "check_crawl_status",
+                  description: "Checks if bot crawlers are currently active/running, generating cards, or idle.",
+                  parameters: { type: "object", properties: {} }
+                },
+                {
+                  name: "execute_local_command",
+                  description: "Runs shell command.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      command: { type: "string" },
+                      cwd: { type: "string" }
+                    },
+                    required: ["command"]
+                  }
                 }
-              },
-              speak: {
-                provider: {
-                  type: "deepgram",
-                  model: cleanVoice,
-                  ...(cleanVoice.startsWith("flux-") ? { version: "v2" } : {})
-                }
-              },
-              greeting: "Hey, I'm here. What's on your mind?"
-            }
-          })
+              ]
+            },
+            listen: {
+              provider: {
+                type: "deepgram",
+                version: "v2",
+                model: "flux-general-en",
+                eot_threshold: 0.5,
+                eager_eot_threshold: 0.3
+              }
+            },
+            speak: {
+              provider: {
+                type: "deepgram",
+                model: cleanVoice,
+                ...(cleanVoice.startsWith("flux-") ? { version: "v2" } : {})
+              }
+            },
+            greeting: "Hey, I'm here. What's on your mind?"
+          }
         };
 
         const createRes = await fetch(`https://api.deepgram.com/v1/projects/${pid}/agents`, {

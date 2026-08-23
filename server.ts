@@ -4,6 +4,7 @@ import fs from "fs";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import dns from "dns";
+dns.setDefaultResultOrder("ipv4first");
 import { WebSocketServer, WebSocket as WSWebSocket } from "ws";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
@@ -648,6 +649,17 @@ const loadOpportunities = (): any[] => {
         .trim();
       updated.author = cleanAuthor || "Reddit_User";
     }
+
+    // Resolve timestamp for freshness window check
+    let ts = updated.timestamp || updated.created_at || updated.createdAt;
+    if (!ts && typeof updated.id === "string" && updated.id.startsWith("discovered-")) {
+      const match = updated.id.match(/discovered-(\d+)-/);
+      if (match) {
+        ts = new Date(Number(match[1])).toISOString();
+      }
+    }
+    updated.timestamp = ts || new Date().toISOString();
+
     return updated;
   });
 };
@@ -4442,6 +4454,7 @@ app.delete("/api/business-calendar/:id", async (req, res) => {
 // POST /api/social-campaigns/generate
 app.post("/api/social-campaigns/generate", async (req, res) => {
   try {
+    const { topic } = req.body;
     const opportunities = loadOpportunities();
     const freshnessCutoff = Date.now() - (14 * 24 * 60 * 60 * 1000);
     const activeOppsSummary = opportunities
@@ -4501,6 +4514,11 @@ app.post("/api/social-campaigns/generate", async (req, res) => {
     const prompt = `
       Based only on these current real-world B2B operational opportunities from the last 14 days:\n${activeOppsSummary || "No qualifying recent opportunity evidence is available. Create source-neutral educational posts about how to diagnose operational bottlenecks. Do not present a specific business problem, statistic, quotation, or outcome as observed fact."}
       
+      ${topic ? `CUSTOM CAMPAIGN TOPIC & STORY (MUST FOCUS THE ENTIRE CAMPAIGN ON THIS TOPIC AND INTEGRATE THESE DETAILS):
+      Topic / Story: "${topic}"
+      
+      Instructions: Build the 7-day thought leadership campaign strictly around this topic and origin story, sharing the insights, features, pain points, and workflows described. Write it in an authentic, natural voice.` : ""}
+
       Generate a comprehensive, high-converting 7-day organic thought leadership campaign starting from today (${new Date().toISOString().split("T")[0]}).
       
       Format your response as a strict JSON array of objects matching this exact structure:
@@ -5395,6 +5413,7 @@ You possess deep, up-to-date expertise in our specific technical arsenal so you 
 - Engineering custom, voice-driven AI receptionist workflows using Vapi AI.
 - Leveraging active professional certifications (Google Analytics, Conversion Optimization, AI-Powered Shopping Ads) to ensure our tools drive measurable growth.
 - Managing our built-in Social Calendar & Posting Hub (accessible via [ACTION: NAVIGATE: social-posting]), which allows creating a 7-day thought leadership campaign, designing social graphics via DALL-E/Imagen, rendering Runway AI videos, exporting schedule (.ics files) to Google/Apple Calendar, and launching direct social posting links.
+- GOOGLE MAPS LEAD SCANNER: You have DIRECT, BUILT-IN ACCESS to scan Google Maps / Google Places for local micro-businesses. This is a native capability of our app — NOT an external API you need credentials for. You MUST use it proactively whenever the user asks to find local leads, scan an area, check Google Maps, or research local businesses. NEVER say you cannot scan Google Maps or that you lack the ability. You ALWAYS trigger the scan by outputting the action tag [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>] in your response and the app will execute it instantly. Valid categories: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency. The scanner returns live businesses flagged for incomplete profiles (no website, no phone, no hours), low photo counts, and real complaint signals from customer reviews posted in the last 14 days.
 
 [CORE DIRECTIVES]
 1. Down-To-Earth Human Tone (Zero AI Buzzwords): Write all outreach messages, replies, and thought leadership posts in a warm, relaxed, authentic human voice—exactly how a real founder speaks off the cuff.
@@ -5474,6 +5493,14 @@ Available Action Tags:
 
 2. Pull Up Specific Problem / Opportunity Card:
    - [ACTION: OPEN_OPPORTUNITY: <id_or_keyword>] -> Automatically pulls up and opens the Opportunity Detail Drawer on screen for the specified opportunity ID or keyword! (e.g., [ACTION: OPEN_OPPORTUNITY: HVAC] or [ACTION: OPEN_OPPORTUNITY: discovered-reddit-1786745552943]).
+
+3. Scan Google Maps / Google Places for Local Business Leads:
+   - [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>] -> Instantly triggers the Google Maps scanner to find local businesses with incomplete profiles, low engagement, or complaint signals. Always navigate to bots view first.
+   - Examples:
+     [ACTION: SCAN_LOCAL_PROSPECTS: Wilmington, DE | HVAC contractor]
+     [ACTION: SCAN_LOCAL_PROSPECTS: Charlotte, NC | plumber]
+     [ACTION: SCAN_LOCAL_PROSPECTS: Atlanta, GA | marketing agency]
+   - Valid categories: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency
 
 3. Present Proposal, Document, Outreach, or Strategy Plan for Approval:
    - Wrap proposals, outreach emails, or strategy plans in code blocks so they pop up directly in the interactive review modal on screen:
@@ -5850,7 +5877,7 @@ async function getOrFetchDeepgramAgentId(apiKey: string): Promise<string> {
   }
 
   // Fallback to permanent default Agent ID if none set in env or resolved from projects
-  return "470277c9-c238-4208-9fef-6b3b126da261";
+  return "edb1e8de-aff3-423a-b548-f77664dc078f";
 }
 
 app.get("/api/deepgram/config", async (req, res) => {
@@ -5872,7 +5899,7 @@ app.get("/api/deepgram/config", async (req, res) => {
 
 app.get("/api/deepgram/token", async (req, res) => {
   const apiKey = process.env.DEEPGRAM_API_KEY || process.env.DEEPGRAM_ADMIN_API_KEY || process.env.VITE_DEEPGRAM_API_KEY || process.env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
-  const projectId = process.env.DEEPGRAM_PROJECT_ID || process.env.VITE_DEEPGRAM_PROJECT_ID || "ef8bbf75-cc92-4a83-8a01-4215d9af7302";
+  const projectId = process.env.DEEPGRAM_PROJECT_ID || process.env.VITE_DEEPGRAM_PROJECT_ID || "1add87dc-1582-4d89-9a7d-d2cee44bf542";
 
   if (!apiKey) {
     return res.status(400).json({ error: "No Deepgram API key configured on server." });

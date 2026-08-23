@@ -17,6 +17,7 @@ interface PacOverlayProps {
   activeView?: string;
   onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting') => void;
   onSelectOpportunity?: (opp: Opportunity | null) => void;
+  onTriggerLocalProspectScan?: (location: string, category: string) => void;
 }
 
 export default function PacOverlay({
@@ -26,7 +27,8 @@ export default function PacOverlay({
   onRefreshOpportunities,
   activeView,
   onNavigateView,
-  onSelectOpportunity
+  onSelectOpportunity,
+  onTriggerLocalProspectScan
 }: PacOverlayProps) {
   // Draggable state
   const [position, setPosition] = useState(() => {
@@ -276,13 +278,14 @@ export default function PacOverlay({
   };
 
   const [dgApiKey, setDgApiKey] = useState<string>(() => {
-    return localStorage.getItem("VITE_DEEPGRAM_API_KEY") || (import.meta as any).env.VITE_DEEPGRAM_API_KEY || (import.meta as any).env.VITE_DEEPGRAM_ADMIN_API_KEY || "";
+    // Env vars always take priority over cached localStorage (so account switches via .env work immediately)
+    return (import.meta as any).env.VITE_DEEPGRAM_API_KEY || (import.meta as any).env.VITE_DEEPGRAM_ADMIN_API_KEY || localStorage.getItem("VITE_DEEPGRAM_API_KEY") || "";
   });
   const [dgAgentId, setDgAgentId] = useState<string>(() => {
-    return localStorage.getItem("VITE_DEEPGRAM_AGENT_ID") || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID || "470277c9-c238-4208-9fef-6b3b126da261";
+    return (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID || localStorage.getItem("VITE_DEEPGRAM_AGENT_ID") || "edb1e8de-aff3-423a-b548-f77664dc078f";
   });
   const [dgProjectId, setDgProjectId] = useState<string>(() => {
-    return localStorage.getItem("VITE_DEEPGRAM_PROJECT_ID") || (import.meta as any).env.VITE_DEEPGRAM_PROJECT_ID || "";
+    return (import.meta as any).env.VITE_DEEPGRAM_PROJECT_ID || localStorage.getItem("VITE_DEEPGRAM_PROJECT_ID") || "";
   });
   const [dgVoice, setDgVoice] = useState<string>(() => {
     return localStorage.getItem("VITE_DEEPGRAM_VOICE") || "aura-2-jupiter-en";
@@ -427,13 +430,14 @@ export default function PacOverlay({
     }
   };
 
-  const handleGenerateCampaign = async () => {
+  const handleGenerateCampaign = async (topic?: string) => {
     setIsLoadingCampaign(true);
     setComputerLogs(prev => [...prev, "[CAMPAIGN-GEN] Planning a fresh 7-day social campaign draft..."]);
     try {
       const res = await apiFetch("/api/social-campaigns/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic })
       });
       if (res.ok) {
         const data = await res.json();
@@ -904,7 +908,18 @@ export default function PacOverlay({
       });
     }
 
-    // 0f. Plan Weekly Social Campaign Action Tag
+    // 0f. Scan Local Prospects via Google Places Action Tag
+    // Syntax: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>]
+    const localScanMatch = text.match(/\[ACTION:\s*SCAN_LOCAL_PROSPECTS:\s*([^|\]]+)(?:\|\s*([^\]]+))?\]/i);
+    if (localScanMatch) {
+      const location = localScanMatch[1].trim();
+      const category = localScanMatch[2]?.trim() || "HVAC contractor";
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🗺️ Triggering Google Places scan for "${category}" in "${location}"...`]);
+      onNavigateView?.("bots");
+      onTriggerLocalProspectScan?.(location, category);
+    }
+
+    // 0g. Plan Weekly Social Campaign Action Tag
     if (text.includes("[ACTION: PLAN_CAMPAIGN]") || /\[ACTION:\s*PLAN_CAMPAIGN\]/i.test(text)) {
       setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 📅 Voice request to plan 7-day thought leadership campaign detected.`]);
       setActiveTab("campaigns");
@@ -1555,8 +1570,9 @@ export default function PacOverlay({
       setComputerLogs(prev => [...prev, "[DEEPGRAM] Establishing direct low-latency WebSocket connection..."]);
 
       const agentId = dgAgentId || (import.meta as any).env.VITE_DEEPGRAM_AGENT_ID;
-      // Connect DIRECTLY to Deepgram's Conversational Voice Agent API to bypass proxy latency
-      const wsUrl = `wss://agent.deepgram.com/v1/agent/converse?encoding=linear16&sample_rate=16000&channels=1&utterance_end_ms=1000&eager_eot_threshold=0.4&eot_threshold=0.7` + (agentId ? `&agent_id=${encodeURIComponent(agentId)}` : "");
+      // Connect DIRECTLY to Deepgram's Conversational Voice Agent API
+      // NOTE: Do NOT put encoding/sample_rate/eot params in the URL — they go in the Settings JSON payload
+      const wsUrl = `wss://agent.deepgram.com/v1/agent/converse`;
 
       const ws = new WebSocket(wsUrl, ["token", tempToken]);
       ws.binaryType = "arraybuffer";
@@ -1606,108 +1622,16 @@ export default function PacOverlay({
           // the pre-built Agent prompt, voice, and models configured directly in Deepgram Console!
           if (!agentId || !useConsoleAgentSettings) {
             setComputerLogs(prev => [...prev, "[DEEPGRAM] Applying dynamic in-app system prompt & voice configuration..."]);
-            const pacSystemPrompt = `Your name is P.A.C. (Partner of Autonomous Capabilities). You are an equal, highly capable AI Business Partner and Lead Sales Strategist.
-
-[CORE RULE: ACTIVE LISTENING & DIRECT RESPONSES (HIGHEST PRIORITY)]
-- When your partner speaks or asks a question, YOU MUST LISTEN CAREFULLY AND ANSWER THEIR SPECIFIC QUESTION OR TOPIC DIRECTLY.
-- NEVER ignore what your partner said. NEVER talk over them or act like you did not hear their input.
-- NEVER recite canned speeches or force an unrelated monologue when your partner asks you something else.
-- Acknowledge their point immediately, give clear, direct, and candid answers, and collaborate like an authentic business partner.
-
-[VOICE & SPEECH FORMATTING - NO ASTERISKS / NO "STAR STAR"]
-- You are a voice agent. Your responses are converted directly into spoken audio by a text-to-speech engine.
-- The text-to-speech engine will read out loud any asterisks as "star star".
-- Therefore, you are strictly forbidden from ever including asterisks (*) or double asterisks (**) anywhere in your responses.
-- Write ALL conversational turns in clean plain text using standard punctuation (commas, periods, question marks) ONLY.
-
-[COMMUNICATION STYLE: DIRECT, NO FLUFF, STRAIGHT SHOOTER]
-- Zero fluff, zero corporate buzzwords ("delve", "game-changer", "synergy", "revolutionize", "leverage", "supercharge", "unleash", "seamless").
-- Tell it like it is: candid, realistic, practical, and grounded in real revenue numbers.
-- Keep spoken responses punchy, concise, and direct (2-4 sentences per turn in speech mode) so conversations flow naturally and quickly.
-
-[PRIME DIRECTIVE: SECURING CLIENT #1 AND CLIENT #2]
-- Your absolute highest-priority mission is LANDING CLIENT #1 AND CLIENT #2. Every single recommendation, post, outreach message, and follow-up must be ruthlessly directed toward securing our first paying clients, collecting their 50% upfront deposit, and proving our business model.
-
-[OUR SOLUTION DELIVERY MODEL: AI AGENT FLEET + HUMAN EXECUTIVE DIRECTION]
-We deliver full-stack software, automated workflows, voice bots, and custom integrations by pairing our AI Agent Fleet (OpenClaw, AI coding agents, n8n/Zapier automations, Python/JS scripts) with human executive oversight (our founder acting as Lead Architect and Quality Director).
-- FEASIBILITY RULE: Only pitch and scope solutions that can be cleanly, reliably built and deployed by our AI Agent Fleet under human direction (e.g. React/Node web apps, client portals, n8n workflows, voice AI bots, API connectors, web scrapers).
-- NEVER PITCH IMPOSSIBLE SCOPE: Never sell overly complex low-level engineering that AI agents and human supervision cannot ship smoothly.
-
-[DUAL-DEMEANOR PROTOCOL: CO-FOUNDER vs. PROSPECT]
-1. INTERNAL CO-FOUNDER DEMEANOR (Talking directly to your partner / the user):
-   - Direct, straight-shooting, candid, and high-energy equal business partner.
-   - Answer their questions directly, give honest feedback, and push back if a strategy is weak.
-   - Work together collaboratively without canned scripts or option paralysis.
-
-2. EXTERNAL PROSPECT DEMEANOR (Drafting replies, outreach, and public posts):
-   - Warm, down-to-earth, natural, conversational human voice—speaking off-the-cuff like an authentic founder.
-   - ZERO AI buzzwords or corporate jargon (strictly BANNED: "delve", "game-changer", "synergy", "revolutionize", "leverage", "unleash", "cutting-edge", "supercharge", "seamless", "testament").
-   - 100% focused on rapport, empathy, diagnostic questions, and upfront problem solving—never pushy selling or premature deposit demands.
-
-[SAFE GIVEAWAY BLUEPRINTS]
-- Use at most one approved blueprint, only when the lead's authentic evidence clearly satisfies its evidenceRequired list and none of its neverUseWhen conditions apply.
-- If uncertain, ask a normal diagnostic question and use no blueprint. Never invent a giveaway.
-- Include every completeInstructions step and the successCheck. The recipient must be able to finish it without us.
-- Never create dependency, omit a step, request credentials, alter billing, handle sensitive information, delete data, move messages, or send bulk/automatic sales messages.
-- Optional paid work must solve a separate larger problem. It is never required to complete or repair the giveaway.
-
-Approved library loaded from the server:
-${JSON.stringify(giveawayBlueprints)}
-
-[TARGET VERTICAL STRATEGY FOR CLIENT #1 & #2]
-- REJECT HEAVY CORPORATE & REGULATED HEALTHCARE: Healthcare networks, hospitals, and large corporate divisions have multi-month procurement cycles, HIPAA compliance sign-offs, vendor board reviews, corporate insurance mandates, and strict licensing requirements. Do NOT target these for Client #1 or #2!
-- COMMERCIAL SOLVENCY & BUDGET QUALIFICATION: Target established micro-businesses generating active revenue (HVAC/plumbing contractors, active real estate brokers, boutique marketing/recruiting agencies with 1-10 employees). They have real cash flow, feel severe operational pain, and can easily approve a $500–$1,500 50% deposit on the spot.
-
-[OUTREACH & MESSAGING DELIVERY TRUTH]
-- Reddit, LinkedIn, Twitter, and forum DMs are dispatched safely via browser deep-linking, NOT by invisible background bots pretending to be the user.
-- When you draft outreach, tell your partner: "I've drafted the message and loaded it into your Review tab. When you click Log, Approve & Launch, it copies the message to your clipboard, marks them Contacted in your CRM, and opens Reddit directly in your browser so you can review and hit send."
-- NEVER claim that background bots secretly sent private DMs from the user's personal account.
-
-[UI ACTION TAGS & APPLICATION CONTROL]
-Whenever you want to pull up a card on screen, run crawlers, or navigate the UI, invoke the corresponding tool function or include the action tag:
-- Navigate App Views: Call function 'navigate_view' OR include '[ACTION: NAVIGATE: board]' (or crm, memory, bots, partner, learning)
-- Pull Up Card: Call function 'pull_up_card' or 'open_opportunity' OR include '[ACTION: OPEN_OPPORTUNITY: <id_or_keyword>]'
-- Run Fleet Lead Sweep: Call function 'trigger_lead_sweep' OR include '[ACTION: TRIGGER_SWEEP]'
-- Run Local Command: Call function 'execute_local_command' OR include '[ACTION: EXECUTE_LOCAL: <command>]'
-
-[CURRENT ACTIVE PIPELINE / OPPORTUNITIES]
-Use this list of active leads to inform your advice or outreach suggestions:
-${JSON.stringify((opportunities || []).map(o => ({ id: o.id, title: o.title, industry: o.industry, painLevel: o.painLevel, score: o.opportunityScore, status: o.status || "Saved" })), null, 2)}
-
-[COMPUTER USE & AUTONOMOUS CAMPAIGN EXECUTION LOGS]
-Use these logs to understand what actions you or your autonomous sub-agents have completed (last 10 entries):
-${JSON.stringify((computerLogs || []).slice(-10), null, 2)}
-
-[AGENT MEMORY & PERSISTENT CONTEXT]
-Below is your persistent memory from prior conversations. You MUST use this to remember pending tasks and follow-ups:
-- Conversation Summary/Notes: ${agentMemory.summary || "No notes stored yet."}
-- Distilled Conversation Memory: ${conversationSummary || "No distilled conversation memory yet."}
-- Personalization Learned from Explicit Discussions: ${JSON.stringify(conversationPersonalization)}
-- Recent Conversation Transcript:
-${messages.slice(-30).map(message => `  - ${message.role === "user" ? "Partner" : "P.A.C."}: ${message.text}`).join("\n") || "  - No prior transcript is available."}
-- Pending/Due Follow-up Tasks:
-${agentMemory.followUps && agentMemory.followUps.length > 0
-  ? agentMemory.followUps.filter(f => !f.completed).map(f => `  - [ ] ${f.task} ${f.dueDate ? `(Due: ${f.dueDate})` : ""}`).join("\n")
-  : "  - None pending currently."
-}
-
-[DOCUMENT & OUTREACH DRAFTING GUIDELINE]
-Whenever you draft, write, or create a proposal, contract, outreach email, or project agreement, format the text inside a markdown code block:
-\`\`\`proposal
-[Insert proposal/contract text here, specifying scope, pricing with 50% upfront, tech stack, and pros/cons]
-\`\`\`
-or
-\`\`\`email
-[Insert email subject line and body here]
-\`\`\`
-
-[MEMORY & FOLLOW-UP UPDATING DIRECTIVE]
-To update your persistent memory or add follow-up tasks based on the conversation, output a \`\`\`memory code block at the end of your response like this:
-\`\`\`memory
-Summary: [Updated summary of current progress and context]
-Follow-up: [Description of a task that needs to be done] (Due: YYYY-MM-DD)
-\`\`\`
-This will automatically update your database and notes so you do not forget them.`;
+            const pacSystemPrompt = `You are P.A.C., an equal AI Business Partner & Lead Sales Strategist.
+Rule 1: ACTIVE LISTENING. Acknowledge user input, answer specific questions directly, and never talk over them or recite irrelevant monologues.
+Rule 2: VOICE ONLY. Never use asterisks (*) or markdown formatting (no bold/bullets) to avoid the voice synthesizer saying "star star". Use standard punctuation.
+Rule 3: NO FLUFF. No AI buzzwords (delve, synergy, leverage, game-changer). Keep spoken turns short (2-4 sentences max).
+Rule 4: TARGETS. Focus on micro-businesses (plumbers, HVAC, agencies, real estate). Exclude healthcare/corporates.
+Rule 5: DELIVERY. We build custom MVPs, n8n/Zapier workflows, and voice bots using an AI agent fleet. DMs are sent by the user via 1-click browser deep-links, not background bots.
+Approved Blueprints: ${JSON.stringify(giveawayBlueprints)}
+Active Opportunities: ${JSON.stringify((opportunities || []).map(o => ({ id: o.id, title: o.title, industry: o.industry, score: o.opportunityScore, status: o.status || "Saved" })))}
+Memory: ${agentMemory.summary || ""} | Distilled: ${conversationSummary || ""}
+Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command, plan_weekly_campaign.`;
 
             settingsPayload.agent = {
               speak: {
@@ -1720,16 +1644,14 @@ This will automatically update your database and notes so you do not forget them
               listen: {
                 provider: {
                   type: "deepgram",
-                  model: "flux-general-en",
-                  version: "v2",
-                  eot_threshold: 0.7,
-                  eager_eot_threshold: 0.4
+                  model: "nova-3"
                 }
               },
+
               think: {
                 provider: {
-                  type: "open_ai",
-                  model: "gpt-4o-mini"
+                  type: "google",
+                  model: "gemini-2.5-flash"
                 },
                 prompt: pacSystemPrompt,
                 functions: [
@@ -1859,10 +1781,15 @@ This will automatically update your database and notes so you do not forget them
                   },
                   {
                     name: "plan_weekly_campaign",
-                    description: "Generates an authentic, 7-day thought leadership social media campaign (LinkedIn, Twitter/X, Reddit, Facebook Groups) with practical advice, free workflow formulas, and visual asset/video prompts to drive organic inbound client leads.",
+                    description: "Generates an authentic, 7-day thought leadership social media campaign (LinkedIn, Twitter/X, Reddit, Facebook Groups). Optionally, pass a custom topic, backstory, or talking points to base the campaign on.",
                     parameters: {
                       type: "object",
-                      properties: {}
+                      properties: {
+                        topic: {
+                          type: "string",
+                          description: "A custom topic, origin story, or talking points (e.g. broken job market, app origin story) to base the campaign on."
+                        }
+                      }
                     }
                   }
                 ]
@@ -1876,7 +1803,34 @@ This will automatically update your database and notes so you do not forget them
             }
           } else {
             setComputerLogs(prev => [...prev, `[DEEPGRAM] Connecting directly to Deepgram Console Agent [ID: ${agentId}] — preserving your custom Deepgram Console prompt & settings.`]);
-            settingsPayload.agent = agentId;
+            // Must send a full agent config object referencing the Console agent — bare string UUID is not valid
+            settingsPayload.agent = {
+              speak: {
+                provider: {
+                  type: "deepgram",
+                  model: dgVoice || "aura-2-jupiter-en",
+                  ...((dgVoice || "aura-2-jupiter-en").startsWith("flux-") ? { version: "v2" } : {})
+                }
+              },
+              listen: {
+                provider: {
+                  type: "deepgram",
+                  model: "nova-3",
+                  keyterm: []
+                }
+              },
+              think: {
+                provider: {
+                  type: "open_ai",
+                  model: "gpt-4o-mini"
+                },
+                prompt: `You are P.A.C., a voice business partner. Be concise (2-3 sentences). No markdown, no bullet points.`,
+                endpoint: {
+                  url: "",
+                  headers: {}
+                }
+              }
+            };
           }
 
           console.log("[P.A.C.] Transmitting official Deepgram Voice Agent Settings payload...", settingsPayload);
@@ -1892,11 +1846,6 @@ This will automatically update your database and notes so you do not forget them
           }
         } catch (e) {
           console.error("[P.A.C.] Failed to send Deepgram Settings payload:", e);
-        }
-
-        if (keepAliveIntervalRef.current) {
-          clearInterval(keepAliveIntervalRef.current);
-          keepAliveIntervalRef.current = null;
         }
 
         if (!isMicMuted) {
@@ -2131,11 +2080,15 @@ This will automatically update your database and notes so you do not forget them
                   setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Command execution error: ${err.message}`]);
                 });
               } else if (funcName === "plan_weekly_campaign") {
-                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📅 Planning 7-day organic social thought leadership campaign...`]);
+                const args = safeParseJSON(msg.arguments || "{}");
+                const topic = args.topic;
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 📅 Planning 7-day organic social thought leadership campaign on: "${topic || 'Default Opportunities'}"...`]);
                 setActiveTab("campaigns");
                 setIsMinimized(false);
-                handleGenerateCampaign();
-                responseOutput = "I have opened the Campaigns tab and initiated generation of a 7-day thought leadership campaign. The posts with advice, workflow templates, and visual prompts will be ready for your review in a few seconds.";
+                handleGenerateCampaign(topic);
+                responseOutput = topic 
+                  ? `I have opened the Campaigns tab and initiated generation of a 7-day thought leadership campaign based on your requested topic: "${topic}". The posts will be ready for your review in a few seconds.`
+                  : "I have opened the Campaigns tab and initiated generation of a 7-day thought leadership campaign. The posts with advice, workflow templates, and visual prompts will be ready for your review in a few seconds.";
               }
 
               if (callId) {

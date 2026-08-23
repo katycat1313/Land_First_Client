@@ -692,6 +692,29 @@ export default function App() {
     }
   };
 
+  // Programmatic scan trigger — called by P.A.C. via SCAN_LOCAL_PROSPECTS action tag
+  const handlePacLocalProspectScan = async (location: string, category: string) => {
+    setLocalProspectLocation(location);
+    setLocalProspectCategory(category);
+    setIsScanningLocalProspects(true);
+    setLocalProspectError("");
+    setLocalProspectResults([]);
+    try {
+      const response = await apiFetch("/api/local-prospects/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: location.trim(), category, maxResults: 15 })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Local prospect scan failed.");
+      setLocalProspectResults(data.results || []);
+    } catch (error: any) {
+      setLocalProspectError(error.message || "Local prospect scan failed.");
+    } finally {
+      setIsScanningLocalProspects(false);
+    }
+  };
+
   // 4. Manual Post Analysis Sandbox
   const handleAnalyzeCustom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2785,6 +2808,7 @@ export default function App() {
         activeView={activeView}
         onNavigateView={setActiveView}
         onSelectOpportunity={setSelectedOpp}
+        onTriggerLocalProspectScan={handlePacLocalProspectScan}
       />
 
       {/* Ollama Local Qwen2.5 Tunnel Configuration Modal */}

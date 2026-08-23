@@ -237,6 +237,17 @@ export const loadOpportunities = (): any[] => {
     if (!updated.solutionOptions || updated.solutionOptions.length === 0) {
       updated.solutionOptions = getFallbackSolutionOptions(updated);
     }
+    
+    // Resolve timestamp for freshness window check
+    let ts = updated.timestamp || updated.created_at || updated.createdAt;
+    if (!ts && typeof updated.id === "string" && updated.id.startsWith("discovered-")) {
+      const match = updated.id.match(/discovered-(\d+)-/);
+      if (match) {
+        ts = new Date(Number(match[1])).toISOString();
+      }
+    }
+    updated.timestamp = ts || new Date().toISOString();
+
     return updated;
   });
 };
