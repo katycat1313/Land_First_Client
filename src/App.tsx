@@ -4,6 +4,7 @@ import OpportunityCardDetail from "./components/OpportunityCardDetail";
 import PacOverlay from "./components/PacOverlay";
 import CrmLedgerView from "./components/CrmLedgerView";
 import AgentMemoryView from "./components/AgentMemoryView";
+import DeepProspectCard from "./components/DeepProspectCard";
 import OllamaTunnelModal from "./components/OllamaTunnelModal";
 import { 
   Sparkles, Search, SlidersHorizontal, Plus, RefreshCw, 
@@ -30,10 +31,29 @@ type LocalProspectSignal = {
   reviewCount: number;
   photoCount: number;
   hasHours: boolean;
+  hasDescription: boolean;
+  likelyUnclaimed: boolean;
+  unclaimedSignalCount: number;
+  profileSignals: LocalProfileSignalFilter[];
   opportunityScore: number;
   reasons: string[];
   recentEvidence: Array<{ text: string; publishedAt: string; authorName: string; authorUri: string | null; signals: string[] }>;
 };
+
+type LocalProfileSignalFilter = "incomplete_profile" | "likely_unclaimed" | "incorrect_information" | "missing_website" | "missing_phone" | "missing_hours" | "few_photos" | "missing_description" | "recent_complaints";
+type ClaimCheck = { status: "verified_unclaimed" | "claim_prompt_not_seen"; checkedAt: string };
+
+const LOCAL_PROFILE_FILTER_OPTIONS: Array<{ value: LocalProfileSignalFilter; label: string; detail: string }> = [
+  { value: "incomplete_profile", label: "Incomplete profile", detail: "At least one key profile field is missing" },
+  { value: "likely_unclaimed", label: "Possible unclaimed", detail: "Proxy: 3+ owner-managed fields are missing" },
+  { value: "incorrect_information", label: "Incorrect information", detail: "A review from the last 14 days explicitly reports it" },
+  { value: "missing_website", label: "No website", detail: "No website is listed" },
+  { value: "missing_phone", label: "No phone", detail: "No phone number is listed" },
+  { value: "missing_hours", label: "No hours", detail: "Detailed opening hours are missing" },
+  { value: "few_photos", label: "Few photos", detail: "Two or fewer profile photos" },
+  { value: "missing_description", label: "No description", detail: "No owner description is present" },
+  { value: "recent_complaints", label: "Recent service complaints", detail: "Matching raw review evidence within 14 days" }
+];
 
 export default function App() {
   const [appMode, setAppMode] = useState<'public' | 'dashboard'>('public');
@@ -137,9 +157,16 @@ export default function App() {
   const [isClearingAlerts, setIsClearingAlerts] = useState(false);
   const [localProspectLocation, setLocalProspectLocation] = useState("");
   const [localProspectCategory, setLocalProspectCategory] = useState("HVAC contractor");
+  const [localProspectFilters, setLocalProspectFilters] = useState<LocalProfileSignalFilter[]>([]);
   const [localProspectResults, setLocalProspectResults] = useState<LocalProspectSignal[]>([]);
   const [isScanningLocalProspects, setIsScanningLocalProspects] = useState(false);
   const [localProspectError, setLocalProspectError] = useState("");
+  const [localClaimChecks, setLocalClaimChecks] = useState<Record<string, ClaimCheck>>({});
+  const [deepProspectResults, setDeepProspectResults] = useState<any[]>([]);
+  const [isDeepScanning, setIsDeepScanning] = useState(false);
+  const [deepScanMode, setDeepScanMode] = useState(false); // toggle between basic and deep
+  const [deepScanError, setDeepScanError] = useState("");
+  const [deepScanMessage, setDeepScanMessage] = useState("");
 
   // AI Brainstorming Partner states
   const [partnerMessages, setPartnerMessages] = useState<Array<{ role: 'user' | 'model'; content: string }>>([
@@ -679,7 +706,8 @@ export default function App() {
         body: JSON.stringify({
           location: localProspectLocation.trim(),
           category: localProspectCategory,
-          maxResults: 15
+          maxResults: 15,
+          signalFilters: localProspectFilters
         })
       });
       const data = await response.json();
@@ -692,10 +720,40 @@ export default function App() {
     }
   };
 
-  // Programmatic scan trigger — called by P.A.C. via SCAN_LOCAL_PROSPECTS action tag
-  const handlePacLocalProspectScan = async (location: string, category: string, unclaimedOnly = false) => {
+  // High-priority no-website scan — established, contactable Places results only
+  const handleDeepProspectScan = async (location: string, category: string) => {
     setLocalProspectLocation(location);
     setLocalProspectCategory(category);
+    setIsDeepScanning(true);
+    setDeepScanError("");
+    setDeepScanMessage("");
+    setDeepProspectResults([]);
+    setDeepScanMode(true);
+    try {
+      const response = await apiFetch("/api/prospects/deep-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: location.trim(), category, maxResults: 20 })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Deep scan failed.");
+      setDeepProspectResults(data.results || []);
+      const verification = data.websiteVerification;
+      setDeepScanMessage(data.message || (data.results?.length
+        ? `${verification?.noCredibleSiteFound ?? 0} with no credible site found · ${verification?.foundOutsideGoogle ?? 0} site found outside Google · ${verification?.needsManualCheck ?? 0} need manual verification.`
+        : "No qualified no-website prospects found."));
+    } catch (error: any) {
+      setDeepScanError(error.message || "Deep prospect scan failed.");
+    } finally {
+      setIsDeepScanning(false);
+    }
+  };
+
+  const handlePacLocalProspectScan = async (location: string, category: string, signalFilters: string[] = []) => {
+    setLocalProspectLocation(location);
+    setLocalProspectCategory(category);
+    const validFilters = signalFilters.filter((filter): filter is LocalProfileSignalFilter => LOCAL_PROFILE_FILTER_OPTIONS.some(option => option.value === filter));
+    setLocalProspectFilters(validFilters);
     setIsScanningLocalProspects(true);
     setLocalProspectError("");
     setLocalProspectResults([]);
@@ -703,7 +761,7 @@ export default function App() {
       const response = await apiFetch("/api/local-prospects/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location: location.trim(), category, maxResults: 15, unclaimedOnly })
+        body: JSON.stringify({ location: location.trim(), category, maxResults: 15, signalFilters: validFilters })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Local prospect scan failed.");
@@ -1775,7 +1833,8 @@ export default function App() {
                     <span className="text-[9px] font-mono text-slate-500 border border-slate-800 rounded px-2 py-1">Powered by Google Maps</span>
                   </div>
 
-                  <form onSubmit={handleLocalProspectScan} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
+                  <form onSubmit={handleLocalProspectScan} className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
                     <input
                       value={localProspectLocation}
                       onChange={(e) => setLocalProspectLocation(e.target.value)}
@@ -1800,11 +1859,104 @@ export default function App() {
                     >
                       <Search size={13} /> {isScanningLocalProspects ? "Scanning..." : "Scan Area"}
                     </button>
+                    </div>
+                    <fieldset>
+                      <legend className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2">Business-need signals <span className="normal-case text-slate-600">(matches any selected)</span></legend>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {LOCAL_PROFILE_FILTER_OPTIONS.map(option => (
+                          <label key={option.value} className={`flex items-start gap-2 rounded-lg border p-2 cursor-pointer transition ${localProspectFilters.includes(option.value) ? "border-emerald-500/50 bg-emerald-950/30" : "border-slate-800 bg-slate-950/50 hover:border-slate-700"}`}>
+                            <input
+                              type="checkbox"
+                              checked={localProspectFilters.includes(option.value)}
+                              onChange={() => setLocalProspectFilters(current => current.includes(option.value) ? current.filter(value => value !== option.value) : [...current, option.value])}
+                              className="mt-0.5 accent-emerald-500"
+                            />
+                            <span><span className="block text-[11px] text-slate-200">{option.label}</span><span className="block text-[9px] text-slate-500 leading-tight mt-0.5">{option.detail}</span></span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[9px] text-slate-500">Possible unclaimed status is an inference, not confirmation from Google. Incorrect-information flags require matching text in a recent review.</p>
+                    </fieldset>
                   </form>
 
                   {localProspectError && <div className="text-xs text-rose-300 bg-rose-950/20 border border-rose-500/20 rounded p-3">{localProspectError}</div>}
+                  {deepScanError && <div className="text-xs text-rose-300 bg-rose-950/20 border border-rose-500/20 rounded p-3">{deepScanError}</div>}
+                  {deepScanMode && deepScanMessage && !deepScanError && <div className="text-xs text-emerald-200 bg-emerald-950/20 border border-emerald-500/20 rounded p-3">{deepScanMessage}</div>}
 
-                  {localProspectResults.length > 0 && (
+                  {/* Mode toggle */}
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={() => setDeepScanMode(false)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition font-semibold ${
+                        !deepScanMode ? "bg-indigo-600 border-indigo-500 text-white" : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600"
+                      }`}
+                    >
+                      Quick Scan
+                    </button>
+                    <button
+                      onClick={() => setDeepScanMode(true)}
+                      className={`text-xs px-3 py-1.5 rounded-lg border transition font-semibold ${
+                        deepScanMode ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600"
+                      }`}
+                    >
+                      🌐 No-Website Leads
+                    </button>
+                    {deepScanMode && (
+                      <button
+                        onClick={() => handleDeepProspectScan(localProspectLocation, localProspectCategory)}
+                        disabled={isDeepScanning || !localProspectLocation}
+                        className="ml-auto text-xs px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold transition"
+                      >
+                        {isDeepScanning ? "Searching..." : "Find No-Website Businesses"}
+                      </button>
+                    )}
+                  </div>
+                  {deepScanMode && (
+                    <p className="text-[10px] text-slate-400">High-priority criteria: no website returned by Google Places, operational status, a listed phone number, and at least 5 reviews. Claim status and other profile gaps remain supporting signals only.</p>
+                  )}
+
+                  {/* Deep Research Results */}
+                  {deepScanMode && deepProspectResults.length > 0 && (
+                    <div>
+                      <div className="text-xs text-emerald-400 font-bold mb-3">
+                        🌐 {deepProspectResults.length} qualified businesses with no website listed
+                      </div>
+                      {deepProspectResults.map((p: any) => (
+                        <DeepProspectCard
+                          key={p.placeId}
+                          prospect={p}
+                          onSaveToCRM={(prospect) => {
+                            // Save as opportunity to CRM
+                            const opp = {
+                              id: `prospect-${prospect.placeId || Date.now()}`,
+                              title: `${prospect.name || prospect.businessName} — ${prospect.suggestedService || prospect.ourSolution?.slice(0, 40) || "Local Prospect"}`,
+                              author: prospect.ownerName || "Unknown decision maker",
+                              sourcePlatform: "Google Maps No-Website Scan",
+                              sourceUrl: prospect.mapsUrl,
+                              text: prospect.painSummary,
+                              problemSummary: prospect.problemStatement,
+                              industry: prospect.category,
+                              status: "Saved",
+                              opportunityScore: prospect.urgencyScore || 60,
+                              notes: `Phone: ${prospect.phone || "N/A"} | Setup: $${prospect.setupFee || 0} | Monthly: $${prospect.monthlyRetainer || 0}/mo`
+                            };
+                            setOpportunities(prev => [opp as any, ...prev]);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {isDeepScanning && (
+                    <div className="text-center py-8 text-slate-400 text-sm">
+                      <div className="animate-spin text-2xl mb-3">🌐</div>
+                      <div className="font-semibold text-emerald-400">Finding established businesses without a listed website...</div>
+                      <div className="text-xs text-slate-500 mt-1">Requires a phone number and at least 5 authentic Google reviews</div>
+                    </div>
+                  )}
+
+                  {/* Quick Scan Results */}
+                  {!deepScanMode && localProspectResults.length > 0 && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {localProspectResults.map(result => (
                         <div key={result.placeId} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
@@ -1820,9 +1972,16 @@ export default function App() {
                             <span>{result.photoCount} photos</span>
                             <span>{result.websiteUrl ? "Website listed" : "No website"}</span>
                             <span>{result.hasHours ? "Hours listed" : "No hours"}</span>
+                            <span>{result.hasDescription ? "Description listed" : "No description"}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {result.reasons.map(reason => <span key={reason} className="text-[9px] text-amber-200 bg-amber-950/30 border border-amber-500/20 rounded px-1.5 py-0.5">{reason}</span>)}
+                            {localClaimChecks[result.placeId]?.status === "verified_unclaimed" && (
+                              <span className="text-[9px] font-bold text-rose-200 bg-rose-950/40 border border-rose-500/30 rounded px-1.5 py-0.5">Claim prompt manually verified</span>
+                            )}
+                            {localClaimChecks[result.placeId]?.status === "claim_prompt_not_seen" && (
+                              <span className="text-[9px] text-slate-300 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5">Claim prompt not seen</span>
+                            )}
                           </div>
                           {result.recentEvidence.map((evidence, index) => (
                             <div key={`${evidence.publishedAt}-${index}`} className="p-2.5 rounded bg-slate-900/60 border border-slate-800 text-[10px] text-slate-300">
@@ -1830,9 +1989,50 @@ export default function App() {
                               <div>“{evidence.text}”</div>
                             </div>
                           ))}
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 flex-wrap">
                             <a href={result.mapsUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-emerald-300 hover:text-white flex items-center gap-1">Inspect on Google Maps <ExternalLink size={10} /></a>
                             {result.websiteUrl && <a href={result.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-cyan-300 hover:text-white flex items-center gap-1">Website <ExternalLink size={10} /></a>}
+                          </div>
+                          <div className="rounded-lg border border-slate-800 bg-slate-900/45 p-2.5 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="text-[10px] font-bold text-slate-200">Google claim-status check</div>
+                                <div className="text-[9px] text-slate-500">Open the live profile and record whether “Claim this business” is visible. This is one supporting identifier and does not qualify the business by itself.</div>
+                              </div>
+                              {!localClaimChecks[result.placeId] && <span className="shrink-0 text-[9px] text-slate-500">Unknown</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setLocalClaimChecks(current => ({ ...current, [result.placeId]: { status: "verified_unclaimed", checkedAt: new Date().toISOString() } }))}
+                                className={`rounded border px-2 py-1 text-[9px] font-semibold transition ${localClaimChecks[result.placeId]?.status === "verified_unclaimed" ? "border-rose-400/60 bg-rose-950/50 text-rose-200" : "border-slate-700 text-slate-300 hover:border-rose-500/50"}`}
+                              >
+                                “Claim this business” visible
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setLocalClaimChecks(current => ({ ...current, [result.placeId]: { status: "claim_prompt_not_seen", checkedAt: new Date().toISOString() } }))}
+                                className={`rounded border px-2 py-1 text-[9px] transition ${localClaimChecks[result.placeId]?.status === "claim_prompt_not_seen" ? "border-slate-500 bg-slate-800 text-white" : "border-slate-700 text-slate-400 hover:border-slate-600"}`}
+                              >
+                                Claim prompt not visible
+                              </button>
+                              {localClaimChecks[result.placeId] && (
+                                <button
+                                  type="button"
+                                  onClick={() => setLocalClaimChecks(current => {
+                                    const next = { ...current };
+                                    delete next[result.placeId];
+                                    return next;
+                                  })}
+                                  className="rounded border border-transparent px-2 py-1 text-[9px] text-slate-500 hover:text-slate-300"
+                                >
+                                  Reset
+                                </button>
+                              )}
+                            </div>
+                            {localClaimChecks[result.placeId] && (
+                              <div className="text-[8px] text-slate-600">Manually checked {new Date(localClaimChecks[result.placeId].checkedAt).toLocaleString()} · kept only for this app session</div>
+                            )}
                           </div>
                         </div>
                       ))}

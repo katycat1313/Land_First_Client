@@ -19,6 +19,7 @@ import {
 } from "./server/db";
 import { GIVEAWAY_BLUEPRINTS, formatGiveawayBlueprintsForPrompt, selectGiveawayBlueprints } from "./server/giveawayBlueprints";
 import { LOCAL_BUSINESS_CATEGORIES, scanGooglePlaces } from "./server/googlePlaces";
+import { runFullEnrichment } from "./server/prospectEnricher";
 import { formatSocialPlatformProfilesForPrompt, getSocialPlatformProfile } from "./server/socialPlatformProfiles";
 import { findOpenVisualReferences } from "./server/visualReferences";
 
@@ -962,6 +963,76 @@ app.post("/api/local-prospects/scan", async (req, res) => {
     });
   } catch (error: any) {
     res.status(400).set("Cache-Control", "no-store").json({ error: error.message || "Google Places scan failed." });
+  }
+});
+
+// Deep prospect research pipeline — Places scan + website enrichment + Gemini pitch generation
+app.post("/api/prospects/deep-scan", async (req, res) => {
+  try {
+    const { location, category, maxResults } = req.body || {};
+    const firecrawlKey = process.env.FIRECRAWL_API_KEY;
+
+    // Stage 1: this high-priority pipeline is deliberately limited to established,
+    // contactable businesses for which Google Places returns no website.
+    const scannedResults = await scanGooglePlaces({
+      location,
+      category,
+      signalFilters: ["missing_website"],
+      maxResults: maxResults || 20
+    });
+    const rawResults = scannedResults.filter(business =>
+      !business.websiteUrl && Boolean(business.phone) && business.reviewCount >= 5
+    );
+
+    if (rawResults.length === 0) {
+      return res.set("Cache-Control", "no-store").json({
+        success: true,
+        scannedAt: new Date().toISOString(),
+        results: [],
+        message: "No established, contactable businesses without a listed website matched this scan."
+      });
+    }
+
+    // Stage 2 + 3: Enrich each business (parallel, capped at 5 concurrent)
+    const CONCURRENCY = 5;
+    const enriched: any[] = [];
+    for (let i = 0; i < rawResults.length; i += CONCURRENCY) {
+      const batch = rawResults.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (biz) => {
+          const enrichment = await runFullEnrichment(biz, firecrawlKey);
+          return { ...biz, ...enrichment };
+        })
+      );
+      for (const result of batchResults) {
+        if (result.status === "fulfilled") enriched.push(result.value);
+        else console.warn("[DeepScan] Enrichment failed for one business:", result.reason);
+      }
+    }
+
+    // Businesses with no independently discovered website remain the highest-priority group.
+    enriched.sort((a, b) => {
+      const statusRank: Record<string, number> = { not_found: 3, inconclusive: 2, not_run: 1, found: 0 };
+      const rankDifference = (statusRank[b.websiteSearchStatus] ?? 0) - (statusRank[a.websiteSearchStatus] ?? 0);
+      return rankDifference || (b.urgencyScore ?? 0) - (a.urgencyScore ?? 0);
+    });
+
+    res.set("Cache-Control", "no-store").json({
+      success: true,
+      scannedAt: new Date().toISOString(),
+      attribution: "Google Maps + Firecrawl web search + Gemini",
+      storagePolicy: "Live prospect intelligence is not persisted by the application.",
+      qualificationPolicy: "No website listed, operational, phone listed, and at least 5 Google reviews.",
+      websiteVerification: {
+        foundOutsideGoogle: enriched.filter(item => item.websiteSearchStatus === "found").length,
+        noCredibleSiteFound: enriched.filter(item => item.websiteSearchStatus === "not_found").length,
+        needsManualCheck: enriched.filter(item => item.websiteSearchStatus === "inconclusive" || item.websiteSearchStatus === "not_run").length
+      },
+      results: enriched
+    });
+  } catch (error: any) {
+    console.error("[DeepScan] Pipeline error:", error);
+    res.status(400).set("Cache-Control", "no-store").json({ error: error.message || "Deep prospect scan failed." });
   }
 });
 
@@ -5415,7 +5486,9 @@ You possess deep, up-to-date expertise in our specific technical arsenal so you 
 - Managing our built-in Social Calendar & Posting Hub (accessible via [ACTION: NAVIGATE: social-posting]), which allows creating a 7-day thought leadership campaign, designing social graphics via DALL-E/Imagen, rendering Runway AI videos, exporting schedule (.ics files) to Google/Apple Calendar, and launching direct social posting links.
 - GOOGLE MAPS LEAD SCANNER: You have DIRECT, BUILT-IN ACCESS to scan Google Maps / Google Places for local micro-businesses. This is a native capability of our app — NOT an external API you need credentials for. You MUST use it proactively whenever the user asks to find local leads, scan an area, check Google Maps, or research local businesses. NEVER say you cannot scan Google Maps or that you lack the ability. You ALWAYS trigger the scan by outputting the action tag in your response and the app executes it instantly.
   - Standard scan: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>]
-  - Unclaimed profiles only: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | unclaimed] — use this when the user asks to find unclaimed, unverified, or incomplete Google Maps profiles. Returns only businesses missing 3+ owner-controlled fields (no website, no phone, no hours, no description, few photos).
+  - Filtered scan: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | <comma-separated filters>]
+  - Valid filters: incomplete_profile, likely_unclaimed, incorrect_information, missing_website, missing_phone, missing_hours, few_photos, missing_description, recent_complaints.
+  - likely_unclaimed is only a proxy based on 3+ missing owner-managed fields; never state that Google confirmed a profile is unclaimed. incorrect_information requires explicit raw review evidence from the last 14 days.
   - Valid categories: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency.
   - The scanner returns live businesses scored by opportunity strength, flagged for incomplete profiles, and includes raw complaint signals from reviews in the last 14 days.
 
@@ -5500,12 +5573,13 @@ Available Action Tags:
 
 3. Scan Google Maps / Google Places for Local Business Leads:
    - Standard: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>]
-   - Unclaimed profiles only: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | unclaimed]
+   - Filtered: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | <comma-separated filters>]
    - Examples:
      [ACTION: SCAN_LOCAL_PROSPECTS: Wilmington, DE | HVAC contractor]
-     [ACTION: SCAN_LOCAL_PROSPECTS: Charlotte, NC | plumber | unclaimed]
-     [ACTION: SCAN_LOCAL_PROSPECTS: Atlanta, GA | marketing agency | unclaimed]
-   - Use | unclaimed when the user asks for unclaimed, unverified, or incomplete profiles.
+     [ACTION: SCAN_LOCAL_PROSPECTS: Charlotte, NC | plumber | likely_unclaimed]
+     [ACTION: SCAN_LOCAL_PROSPECTS: Atlanta, GA | marketing agency | incomplete_profile,incorrect_information]
+   - Valid filters: incomplete_profile, likely_unclaimed, incorrect_information, missing_website, missing_phone, missing_hours, few_photos, missing_description, recent_complaints.
+   - Treat likely_unclaimed as a missing-field proxy, never as confirmed ownership status. Only flag incorrect_information when a recent raw review explicitly supports it.
    - Valid categories: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency
 
 3. Present Proposal, Document, Outreach, or Strategy Plan for Approval:

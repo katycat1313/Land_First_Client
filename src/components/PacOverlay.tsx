@@ -9,6 +9,15 @@ import {
 import { sendGmailEmail } from "../utils/gmailApi";
 import { Opportunity } from "../types";
 
+const safeParseJSON = (value: string): Record<string, any> => {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 interface PacOverlayProps {
   opportunities: Opportunity[];
   gmailToken: string | null;
@@ -2112,7 +2121,7 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
                 onNavigateView?.("bots");
                 responseOutput = `Scanning Google Maps for ${category} businesses in ${location}${unclaimedOnly ? " with incomplete or unclaimed profiles" : ""}. Navigating to the Local Business Signal Scan panel now — results will appear there in a few seconds.`;
                 // Fire the actual scan in the background
-                onTriggerLocalProspectScan?.(location, category, unclaimedOnly);
+                onTriggerLocalProspectScan?.(location, category, unclaimedOnly ? ["likely_unclaimed"] : []);
               } else if (funcName === "plan_weekly_campaign") {
                 const args = safeParseJSON(msg.arguments || "{}");
                 const topic = args.topic;
@@ -4031,7 +4040,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                     )}
 
                     <button
-                      onClick={handleGenerateCampaign}
+                      onClick={() => handleGenerateCampaign()}
                       disabled={isLoadingCampaign}
                       className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[10px] font-bold font-mono transition flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg cursor-pointer"
                       type="button"
@@ -4327,7 +4336,7 @@ Instructions: Re-generate the revised document wrapped in a code block. If you d
                         </p>
                       </div>
                       <button
-                        onClick={handleGenerateCampaign}
+                        onClick={() => handleGenerateCampaign()}
                         className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-[9.5px] font-bold font-mono transition cursor-pointer"
                         type="button"
                       >

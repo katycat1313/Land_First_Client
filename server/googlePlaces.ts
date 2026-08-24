@@ -3,6 +3,13 @@ const MAX_SIGNAL_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 // Minimum number of "unclaimed proxy" signals required to label a profile as likely unclaimed
 const UNCLAIMED_SIGNAL_THRESHOLD = 3;
 
+export const LOCAL_PROFILE_SIGNAL_FILTERS = [
+  "incomplete_profile", "likely_unclaimed", "incorrect_information",
+  "missing_website", "missing_phone", "missing_hours", "few_photos",
+  "missing_description", "recent_complaints"
+] as const;
+export type LocalProfileSignalFilter = typeof LOCAL_PROFILE_SIGNAL_FILTERS[number];
+
 export const LOCAL_BUSINESS_CATEGORIES = [
   "HVAC contractor",
   "plumber",
@@ -23,11 +30,19 @@ const COMPLAINT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: "communication breakdown", pattern: /communication|kept me informed|never heard|left .* message/i }
 ];
 
+const INCORRECT_INFO_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  { label: "review reports incorrect business hours", pattern: /(?:hours?|open|clos(?:e|ed|ing)).{0,45}(?:wrong|incorrect|inaccurate|outdated|not updated)|(?:wrong|incorrect|inaccurate|outdated).{0,45}(?:hours?|open|clos(?:e|ed|ing))/i },
+  { label: "review reports an incorrect address", pattern: /(?:address|location|map pin).{0,45}(?:wrong|incorrect|inaccurate|outdated)|(?:wrong|incorrect|inaccurate|outdated).{0,45}(?:address|location|map pin)/i },
+  { label: "review reports an incorrect phone number", pattern: /(?:phone|number).{0,45}(?:wrong|incorrect|disconnected|out of service|doesn'?t work)|(?:wrong|incorrect|disconnected).{0,45}(?:phone|number)/i },
+  { label: "review reports incorrect website information", pattern: /(?:website|site|online).{0,45}(?:wrong|incorrect|inaccurate|outdated|broken)|(?:wrong|incorrect|inaccurate|outdated|broken).{0,45}(?:website|site)/i }
+];
+
 type PlacesScanInput = {
   location: string;
   category: string;
   maxResults?: number;
   unclaimedOnly?: boolean; // When true, only return businesses with 3+ missing owner-controlled fields
+  signalFilters?: LocalProfileSignalFilter[];
 };
 
 export type LocalBusinessSignal = {
@@ -45,6 +60,7 @@ export type LocalBusinessSignal = {
   hasDescription: boolean;
   likelyUnclaimed: boolean;      // true when 3+ owner-controlled fields are missing
   unclaimedSignalCount: number;
+  profileSignals: LocalProfileSignalFilter[];
   opportunityScore: number;
   reasons: string[];
   recentEvidence: Array<{
@@ -65,6 +81,11 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
   const location = String(input.location || "").trim();
   const category = String(input.category || "").trim();
   const unclaimedOnly = Boolean(input.unclaimedOnly);
+  const requestedFilters = Array.from(new Set(
+    (Array.isArray(input.signalFilters) ? input.signalFilters : [])
+      .filter((value): value is LocalProfileSignalFilter => LOCAL_PROFILE_SIGNAL_FILTERS.includes(value as LocalProfileSignalFilter))
+  ));
+  if (unclaimedOnly && !requestedFilters.includes("likely_unclaimed")) requestedFilters.push("likely_unclaimed");
   if (location.length < 2) throw new Error("A city, state, or service area is required.");
   if (!LOCAL_BUSINESS_CATEGORIES.includes(category as any)) throw new Error("Choose an approved small-business category.");
 
@@ -115,12 +136,14 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
         .map((review: any) => {
           const text = String(review.originalText?.text || review.text?.text || "").trim();
           const signals = COMPLAINT_PATTERNS.filter(item => item.pattern.test(text)).map(item => item.label);
+          const incorrectInfoSignals = INCORRECT_INFO_PATTERNS.filter(item => item.pattern.test(text)).map(item => item.label);
           return {
             text,
             publishedAt: review.publishTime,
             authorName: review.authorAttribution?.displayName || "Google reviewer",
             authorUri: review.authorAttribution?.uri || null,
-            signals
+            signals: [...signals, ...incorrectInfoSignals],
+            incorrectInfoSignals
           };
         })
         .filter((review: any) => review.text && review.signals.length > 0);
@@ -137,6 +160,17 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
       const missingDesc     = !hasDescription;
       const unclaimedSignalCount = [missingWebsite, missingPhone, missingHours, missingPhotos, missingDesc].filter(Boolean).length;
       const likelyUnclaimed = unclaimedSignalCount >= UNCLAIMED_SIGNAL_THRESHOLD;
+      const hasIncorrectInformationEvidence = recentEvidence.some((review: any) => review.incorrectInfoSignals.length > 0);
+      const profileSignals: LocalProfileSignalFilter[] = [];
+      if (unclaimedSignalCount > 0) profileSignals.push("incomplete_profile");
+      if (likelyUnclaimed) profileSignals.push("likely_unclaimed");
+      if (hasIncorrectInformationEvidence) profileSignals.push("incorrect_information");
+      if (missingWebsite) profileSignals.push("missing_website");
+      if (missingPhone) profileSignals.push("missing_phone");
+      if (missingHours) profileSignals.push("missing_hours");
+      if (missingPhotos) profileSignals.push("few_photos");
+      if (missingDesc) profileSignals.push("missing_description");
+      if (recentEvidence.length > 0) profileSignals.push("recent_complaints");
 
       const reasons: string[] = [];
       let score = 20;
@@ -145,7 +179,8 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
       if (missingHours)    { reasons.push("No detailed business hours"); score += 10; }
       if (missingPhotos)   { reasons.push(`${photoCount} profile photos (low)`); score += 12; }
       if (missingDesc)     { reasons.push("No owner description"); score += 12; }
-      if (likelyUnclaimed) { reasons.push(`⚠️ Likely unclaimed profile (${unclaimedSignalCount}/5 owner fields missing)`); score += 15; }
+      if (likelyUnclaimed) { reasons.push(`Possible unclaimed profile (${unclaimedSignalCount}/5 owner-managed fields missing; proxy only)`); score += 15; }
+      if (hasIncorrectInformationEvidence) { reasons.push("Recent review reports incorrect profile information"); score += 20; }
       if (recentEvidence.length > 0) { reasons.push(`${recentEvidence.length} complaint signal within 14 days`); score += 28; }
       if (reviewCount >= 10) { reasons.push("Established customer activity"); score += 8; }
       if (reviewCount < 5) score -= 12;
@@ -165,14 +200,16 @@ export async function scanGooglePlaces(input: PlacesScanInput): Promise<LocalBus
         hasDescription,
         likelyUnclaimed,
         unclaimedSignalCount,
+        profileSignals,
         opportunityScore: clamp(score, 0, 100),
         reasons,
         recentEvidence
       };
     })
     .filter((place: LocalBusinessSignal) => {
-      if (unclaimedOnly) return place.likelyUnclaimed && place.opportunityScore >= 35;
-      return place.opportunityScore >= 35;
+      if (place.opportunityScore < 35) return false;
+      if (requestedFilters.length === 0) return true;
+      return requestedFilters.some(filter => place.profileSignals.includes(filter));
     })
     .sort((a: LocalBusinessSignal, b: LocalBusinessSignal) => b.opportunityScore - a.opportunityScore);
 }
