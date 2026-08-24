@@ -17,7 +17,7 @@ interface PacOverlayProps {
   activeView?: string;
   onNavigateView?: (view: 'board' | 'crm' | 'memory' | 'bots' | 'partner' | 'learning' | 'social-posting') => void;
   onSelectOpportunity?: (opp: Opportunity | null) => void;
-  onTriggerLocalProspectScan?: (location: string, category: string, unclaimedOnly?: boolean) => void;
+  onTriggerLocalProspectScan?: (location: string, category: string, signalFilters?: string[]) => void;
 }
 
 export default function PacOverlay({
@@ -910,15 +910,15 @@ export default function PacOverlay({
 
     // 0f. Scan Local Prospects via Google Places Action Tag
     // Syntax: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category>]
-    // Unclaimed mode: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | unclaimed]
-    const localScanMatch = text.match(/\[ACTION:\s*SCAN_LOCAL_PROSPECTS:\s*([^|\]]+)(?:\|\s*([^|\]]+))?(?:\|\s*(unclaimed))?\]/i);
+    // Optional filters: [ACTION: SCAN_LOCAL_PROSPECTS: <city, state> | <category> | incomplete_profile,likely_unclaimed]
+    const localScanMatch = text.match(/\[ACTION:\s*SCAN_LOCAL_PROSPECTS:\s*([^|\]]+)(?:\|\s*([^|\]]+))?(?:\|\s*([^\]]+))?\]/i);
     if (localScanMatch) {
       const location = localScanMatch[1].trim();
       const category = localScanMatch[2]?.trim() || "HVAC contractor";
-      const unclaimedOnly = Boolean(localScanMatch[3]);
-      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🗺️ Triggering Google Places scan for "${category}" in "${location}"${unclaimedOnly ? " (unclaimed profiles only)" : ""}...`]);
+      const signalFilters = (localScanMatch[3] || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean).map(value => value === "unclaimed" ? "likely_unclaimed" : value);
+      setComputerLogs(prev => [...prev, `[P.A.C. ACTION] 🗺️ Triggering Google Places scan for "${category}" in "${location}"${signalFilters.length ? ` (${signalFilters.join(", ")})` : ""}...`]);
       onNavigateView?.("bots");
-      onTriggerLocalProspectScan?.(location, category, unclaimedOnly);
+      onTriggerLocalProspectScan?.(location, category, signalFilters);
     }
 
     // 0g. Plan Weekly Social Campaign Action Tag
@@ -1630,10 +1630,11 @@ Rule 2: VOICE ONLY. Never use asterisks (*) or markdown formatting (no bold/bull
 Rule 3: NO FLUFF. No AI buzzwords (delve, synergy, leverage, game-changer). Keep spoken turns short (2-4 sentences max).
 Rule 4: TARGETS. Focus on micro-businesses (plumbers, HVAC, agencies, real estate). Exclude healthcare/corporates.
 Rule 5: DELIVERY. We build custom MVPs, n8n/Zapier workflows, and voice bots using an AI agent fleet. DMs are sent by the user via 1-click browser deep-links, not background bots.
+Rule 6: GOOGLE MAPS SCANNER. You have a BUILT-IN Google Maps scanner. When the user asks to find local leads, scan an area, find unclaimed or incomplete profiles, or research local businesses on Google Maps, you MUST call the scan_google_maps function immediately. NEVER say you cannot scan Google Maps or that you lack this tool. Set unclaimed_only to true when user wants unclaimed or incomplete profiles.
 Approved Blueprints: ${JSON.stringify(giveawayBlueprints)}
 Active Opportunities: ${JSON.stringify((opportunities || []).map(o => ({ id: o.id, title: o.title, industry: o.industry, score: o.opportunityScore, status: o.status || "Saved" })))}
 Memory: ${agentMemory.summary || ""} | Distilled: ${conversationSummary || ""}
-Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command, plan_weekly_campaign.`;
+Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command, plan_weekly_campaign, scan_google_maps.`;
 
             settingsPayload.agent = {
               speak: {
@@ -1792,6 +1793,28 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
                           description: "A custom topic, origin story, or talking points (e.g. broken job market, app origin story) to base the campaign on."
                         }
                       }
+                    }
+                  },
+                  {
+                    name: "scan_google_maps",
+                    description: "Scans Google Maps / Google Places for local micro-businesses with incomplete, unclaimed, or low-engagement profiles. Use this whenever the user asks to find local leads, scan Google Maps, find unclaimed businesses, or search for businesses with missing profiles in a specific city. Returns scored leads with opportunity signals.",
+                    parameters: {
+                      type: "object",
+                      properties: {
+                        location: {
+                          type: "string",
+                          description: "City and state to scan, e.g. Charlotte, NC or Wilmington, DE"
+                        },
+                        category: {
+                          type: "string",
+                          description: "Business category: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency"
+                        },
+                        unclaimed_only: {
+                          type: "boolean",
+                          description: "Set to true to return only businesses likely missing 3 or more owner-controlled profile fields (unclaimed or incomplete profiles)"
+                        }
+                      },
+                      required: ["location", "category"]
                     }
                   }
                 ]
@@ -2081,6 +2104,15 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
                 }).catch(err => {
                   setComputerLogs(prev => [...prev, `[P.A.C. BACKGROUND-ERR] Command execution error: ${err.message}`]);
                 });
+              } else if (funcName === "scan_google_maps") {
+                const location = rawArgs.location || "";
+                const category = rawArgs.category || "HVAC contractor";
+                const unclaimedOnly = Boolean(rawArgs.unclaimed_only);
+                setComputerLogs(prev => [...prev, `[P.A.C. TOOL-USE] 🗺️ Scanning Google Maps for "${category}" in "${location}"${unclaimedOnly ? " (unclaimed only)" : ""}...`]);
+                onNavigateView?.("bots");
+                responseOutput = `Scanning Google Maps for ${category} businesses in ${location}${unclaimedOnly ? " with incomplete or unclaimed profiles" : ""}. Navigating to the Local Business Signal Scan panel now — results will appear there in a few seconds.`;
+                // Fire the actual scan in the background
+                onTriggerLocalProspectScan?.(location, category, unclaimedOnly);
               } else if (funcName === "plan_weekly_campaign") {
                 const args = safeParseJSON(msg.arguments || "{}");
                 const topic = args.topic;

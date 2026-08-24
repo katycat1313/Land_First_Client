@@ -8,7 +8,8 @@ Rule 2: VOICE ONLY. Never use asterisks (*) or markdown formatting (no bold/bull
 Rule 3: NO FLUFF. No AI buzzwords (delve, synergy, leverage, game-changer). Keep spoken turns short (2-4 sentences max).
 Rule 4: TARGETS. Focus on micro-businesses (plumbers, HVAC, agencies, real estate). Exclude healthcare/corporates.
 Rule 5: DELIVERY. We build custom MVPs, n8n/Zapier workflows, and voice bots using an AI agent fleet. DMs are sent by the user via 1-click browser deep-links, not background bots.
-Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command.`;
+Rule 6: GOOGLE MAPS SCANNER. You have a BUILT-IN Google Maps scanner. When the user asks to find local leads, scan an area, find unclaimed or incomplete profiles, or research local businesses on Google Maps, you MUST call the scan_google_maps function immediately. NEVER say you cannot scan Google Maps or that you lack this tool. Valid categories: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency. Set unclaimed_only to true when user wants unclaimed or incomplete profiles.
+Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_sweep, check_crawl_status, execute_local_command, scan_google_maps.`;
 
 export async function setupDeepgramAgent(apiKey: string, projectId?: string, voice?: string, forceNew?: boolean): Promise<{ success: boolean; agentId?: string; logs: string[] }> {
   const logs: string[] = [];
@@ -125,6 +126,19 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
                           },
                           required: ["command"]
                         }
+                      },
+                      {
+                        name: "scan_google_maps",
+                        description: "Scans Google Maps / Google Places for local micro-businesses with incomplete, unclaimed, or low-engagement profiles. Returns scored leads with opportunity signals. Use whenever user asks to find local leads, scan Google Maps, or find unclaimed business profiles.",
+                        parameters: {
+                          type: "object",
+                          properties: {
+                            location: { type: "string", description: "City and state, e.g. Charlotte, NC" },
+                            category: { type: "string", description: "Business category: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency" },
+                            unclaimed_only: { type: "boolean", description: "If true, return only businesses likely missing 3+ owner-controlled profile fields (unclaimed/incomplete profiles)" }
+                          },
+                          required: ["location", "category"]
+                        }
                       }
                     ]
                   },
@@ -237,6 +251,19 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
                       cwd: { type: "string" }
                     },
                     required: ["command"]
+                  }
+                },
+                {
+                  name: "scan_google_maps",
+                  description: "Scans Google Maps / Google Places for local micro-businesses with incomplete, unclaimed, or low-engagement profiles. Returns scored leads with opportunity signals. Use whenever user asks to find local leads, scan Google Maps, or find unclaimed business profiles.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      location: { type: "string", description: "City and state, e.g. Charlotte, NC" },
+                      category: { type: "string", description: "Business category: HVAC contractor, plumber, roofer, landscaper, electrician, real estate agency, property management company, marketing agency, recruiting agency" },
+                      unclaimed_only: { type: "boolean", description: "If true, return only businesses likely missing 3+ owner-controlled profile fields (unclaimed/incomplete profiles)" }
+                    },
+                    required: ["location", "category"]
                   }
                 }
               ]
