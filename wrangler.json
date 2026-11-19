@@ -16,12 +16,12 @@
   },
   "routes": [
     {
-      "pattern": "missedrevenue.org",
-      "custom_domain": true
+      "pattern": "missedrevenue.org/*",
+      "custom_domain": false
     },
     {
-      "pattern": "www.missedrevenue.org",
-      "custom_domain": true
+      "pattern": "www.missedrevenue.org/*",
+      "custom_domain": false
     }
   ]
 }
