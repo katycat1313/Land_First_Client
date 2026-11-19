@@ -1678,7 +1678,7 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
               think: {
                 provider: {
                   type: "google",
-                  model: "gemini-3.8-live"
+                  model: "gemini-3.5-flash"
                 },
                 prompt: pacSystemPrompt,
                 functions: [
@@ -2418,7 +2418,8 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
 
         if (audioCtx.audioWorklet) {
           try {
-            if (!(audioCtx as any).__pcmWorkletLoaded) {
+            const audioCtxState = audioCtx as any;
+            if (!audioCtxState.__pcmWorkletLoaded) {
               const workletCode = `
 class PCMProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -2446,11 +2447,23 @@ class PCMProcessor extends AudioWorkletProcessor {
 }
 registerProcessor('pcm-processor', PCMProcessor);
 `;
-              const blob = new Blob([workletCode], { type: "application/javascript" });
-              const workletUrl = URL.createObjectURL(blob);
-              await audioCtx.audioWorklet.addModule(workletUrl);
-              URL.revokeObjectURL(workletUrl);
-              (audioCtx as any).__pcmWorkletLoaded = true;
+              if (!audioCtxState.__pcmWorkletLoading) {
+                audioCtxState.__pcmWorkletLoading = (async () => {
+                  const blob = new Blob([workletCode], { type: "application/javascript" });
+                  const workletUrl = URL.createObjectURL(blob);
+                  try {
+                    await audioCtx.audioWorklet.addModule(workletUrl);
+                  } finally {
+                    URL.revokeObjectURL(workletUrl);
+                  }
+                  audioCtxState.__pcmWorkletLoaded = true;
+                })();
+              }
+              try {
+                await audioCtxState.__pcmWorkletLoading;
+              } finally {
+                audioCtxState.__pcmWorkletLoading = null;
+              }
             }
 
             const workletNode = new AudioWorkletNode(audioCtx, "pcm-processor");

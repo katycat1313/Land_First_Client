@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { GEMINI_LIVE_MODEL } from "./llm";
+import { DEEPGRAM_THINK_MODEL } from "./llm";
 
 dotenv.config();
 
@@ -72,7 +72,7 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
                 metadata: { title: "P.A.C. Partner Agent" },
                 config: {
                   think: {
-                    provider: { type: "google", model: GEMINI_LIVE_MODEL },
+                    provider: { type: "google", model: DEEPGRAM_THINK_MODEL },
                     prompt: GLOBAL_PAC_SYSTEM_PROMPT,
                     functions: [
                       {
@@ -198,7 +198,7 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
           metadata: { title: "P.A.C. Partner Agent" },
           config: {
             think: {
-              provider: { type: "google", model: GEMINI_LIVE_MODEL },
+              provider: { type: "google", model: DEEPGRAM_THINK_MODEL },
               prompt: GLOBAL_PAC_SYSTEM_PROMPT,
               functions: [
                 {

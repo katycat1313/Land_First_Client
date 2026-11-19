@@ -7,7 +7,8 @@
   ],
   "vars": {
     "GEMINI_GENERATE_MODEL": "gemini-3.8-flash",
-    "GEMINI_LIVE_MODEL": "gemini-3.8-live"
+    "GEMINI_LIVE_MODEL": "gemini-3.8-live",
+    "DEEPGRAM_THINK_MODEL": "gemini-3.5-flash"
   },
   "assets": {
     "directory": "dist",

@@ -5,6 +5,7 @@ dotenv.config();
 
 export const GEMINI_GENERATE_MODEL = process.env.GEMINI_GENERATE_MODEL || "gemini-3.8-flash";
 export const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-3.8-live";
+export const DEEPGRAM_THINK_MODEL = process.env.DEEPGRAM_THINK_MODEL || "gemini-3.5-flash";
 
 export let llmConfig = {
   baseUrl: process.env.OLLAMA_BASE_URL || "https://your-ollama-tunnel.trycloudflare.com",
