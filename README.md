@@ -2,6 +2,8 @@
 
 A real-time opportunity discovery engine and AI partner designed to find genuine business problems, analyze operational bottlenecks, and connect with micro-business owners who need practical software, automation, and digital solutions.
 
+Deployments can be retriggered by pushing a new commit.
+
 ---
 
 ## What This App Does
