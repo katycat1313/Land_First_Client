@@ -5,6 +5,10 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "vars": {
+    "GEMINI_GENERATE_MODEL": "gemini-3.8-flash",
+    "GEMINI_LIVE_MODEL": "gemini-3.8-live"
+  },
   "assets": {
     "directory": "dist",
     "binding": "ASSETS",

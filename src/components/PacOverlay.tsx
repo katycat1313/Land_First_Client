@@ -1203,6 +1203,7 @@ export default function PacOverlay({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const activeSourcesRef = useRef<any[]>([]);
   const nextPlayTimeRef = useRef<number>(0);
+  const bargeInActiveRef = useRef<boolean>(false);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const micAnimationIdRef = useRef<number | null>(null);
   const keepAliveIntervalRef = useRef<any>(null);
@@ -1355,8 +1356,18 @@ export default function PacOverlay({
     nextPlayTimeRef.current = 0;
   };
 
+  const interruptAssistantPlayback = (source: string) => {
+    if (!bargeInActiveRef.current && activeSourcesRef.current.length > 0) {
+      setComputerLogs(prev => [...prev, `[DEEPGRAM-BARGE] User interruption detected (${source}); stopping assistant audio.`]);
+    }
+    bargeInActiveRef.current = true;
+    stopStreamingPlayback();
+    ignoreAudioRef.current = true;
+    setPacStatus("listening");
+  };
+
   const playPcmChunk = async (data: Blob | ArrayBuffer) => {
-    if (isSpeakerMutedRef.current || ignoreAudioRef.current) return;
+    if (isSpeakerMutedRef.current || ignoreAudioRef.current || bargeInActiveRef.current) return;
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       audioCtxRef.current = ctx;
@@ -1454,6 +1465,8 @@ export default function PacOverlay({
   };
 
   const cleanupAudio = () => {
+    bargeInActiveRef.current = false;
+    ignoreAudioRef.current = false;
     stopDgMic();
     stopStreamingPlayback();
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
@@ -1539,6 +1552,8 @@ export default function PacOverlay({
       (window as any).__activeDgSocket = null;
     }
 
+    bargeInActiveRef.current = false;
+    ignoreAudioRef.current = false;
     cleanupAudio();
 
     if (!audioCtxRef.current || audioCtxRef.current.state === "closed") {
@@ -1663,7 +1678,7 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
               think: {
                 provider: {
                   type: "google",
-                  model: "gemini-2.5-flash"
+                  model: "gemini-3.8-live"
                 },
                 prompt: pacSystemPrompt,
                 functions: [
@@ -1901,6 +1916,10 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
         });
 
         if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
+          if (isHumanSpeakingRef.current) {
+            interruptAssistantPlayback("local VAD");
+            return;
+          }
           playPcmChunk(event.data);
         } else if (typeof event.data === "string") {
           if (!event.data.includes("LatencyReport")) {
@@ -2214,9 +2233,7 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
                 setPacStatus("thinking");
               }
             } else if (msg.type === "UserStartedSpeaking" || msg.type === "SpeechStarted") {
-              stopStreamingPlayback();
-              ignoreAudioRef.current = true;
-              setPacStatus("listening");
+              interruptAssistantPlayback(msg.type);
               setComputerLogs(prev => [...prev, "[DEEPGRAM-VAD] Human voice detected speaking..."]);
 
               const text = assistantAccumulatedTextRef.current;
@@ -2225,16 +2242,18 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
                 assistantAccumulatedTextRef.current = "";
               }
             } else if (msg.type === "UserFinishedSpeaking" || msg.type === "UtteranceEnd") {
+              bargeInActiveRef.current = false;
+              ignoreAudioRef.current = false;
               setPacStatus("thinking");
               setComputerLogs(prev => [...prev, "[DEEPGRAM-VAD] Human voice ended. Processing agent response..."]);
             } else if (msg.type === "AgentThinking") {
               setPacStatus("thinking");
             } else if (msg.type === "Interrupted" || msg.type === "interrupted") {
-              stopStreamingPlayback();
-              ignoreAudioRef.current = true;
-              setPacStatus("listening");
+              interruptAssistantPlayback(msg.type);
               setComputerLogs(prev => [...prev, "[DEEPGRAM-BARGE] Interrupted: Speaker stopped, listening..."]);
             } else if (msg.type === "AgentAudioDone" || msg.type === "ConversationCompleted") {
+              bargeInActiveRef.current = false;
+              ignoreAudioRef.current = false;
               setPacStatus("listening");
 
               const text = assistantAccumulatedTextRef.current;
@@ -2365,6 +2384,9 @@ Tools: list_opportunities, pull_up_card, update_opportunity_card, trigger_lead_s
           const now = Date.now();
 
           if (speechVolume >= speechThreshold) {
+            if (pacStatus === "speaking" && !bargeInActiveRef.current) {
+              interruptAssistantPlayback("local VAD");
+            }
             isHumanSpeakingRef.current = true;
             lastHumanSpeechTimeRef.current = now;
             hasSpokenInTurnRef.current = true;

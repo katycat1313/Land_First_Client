@@ -3,6 +3,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+export const GEMINI_GENERATE_MODEL = process.env.GEMINI_GENERATE_MODEL || "gemini-3.8-flash";
+export const GEMINI_LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-3.8-live";
+
 export let llmConfig = {
   baseUrl: process.env.OLLAMA_BASE_URL || "https://your-ollama-tunnel.trycloudflare.com",
   crawlerTunnelUrl: process.env.CRAWLER_TUNNEL_URL || process.env.MAC_TUNNEL_URL || "",
@@ -13,12 +16,16 @@ export let llmConfig = {
 };
 
 export const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const configuredKey = process.env.GEMINI_API_KEY || process.env.GEMINI_LIVE_API_KEY;
+  const apiKey = configuredKey
+    ?.trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["']|["']$/g, "");
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not defined. Please configure it in Settings > Secrets.");
+    throw new Error("GEMINI_API_KEY is not configured. Set it as a Cloudflare secret with `wrangler secret put GEMINI_API_KEY`.");
   }
   return new GoogleGenAI({
-    apiKey: apiKey,
+    apiKey,
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build"
@@ -362,10 +369,7 @@ export async function generateUnifiedLLM({
 
   const ai = getGeminiClient();
   const geminiModels = [
-    "gemini-3.7-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-3.1-flash-lite",
+    GEMINI_GENERATE_MODEL,
     "gemini-3.5-flash-lite",
     "gemini-flash-latest"
   ];
@@ -393,6 +397,13 @@ export async function generateUnifiedLLM({
       } catch (err: any) {
         lastErr = err;
         const errStr = String(err?.message || err) + JSON.stringify(err || {});
+        const isAuthError = errStr.includes("401")
+          || errStr.includes("API key not valid")
+          || errStr.includes("ACCESS_TOKEN_TYPE_UNSUPPORTED")
+          || errStr.includes("UNAUTHENTICATED");
+        if (isAuthError) {
+          throw new Error("Gemini authentication failed. Verify GEMINI_API_KEY is a Google AI API key (not an OAuth access token or `Bearer ...` value), then redeploy the Worker secret.");
+        }
         const is429 = errStr.includes("429") || errStr.includes("quota") || errStr.includes("RESOURCE_EXHAUSTED");
         if (is429) {
           console.warn(`[LLM Unified] Gemini quota/rate limit hit on ${gModel} (attempt ${attempt + 1}). Backing off...`);

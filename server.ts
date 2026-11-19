@@ -26,6 +26,7 @@ import { findOpenVisualReferences } from "./server/visualReferences";
 import {
   generateUnifiedLLM,
   getGeminiClient,
+  GEMINI_GENERATE_MODEL,
   safeParseJSON,
   generateSemanticQueries,
   callOllamaLLM,
@@ -1070,11 +1071,11 @@ app.get("/api/diagnostics/health", async (req, res) => {
   try {
     const ai = getGeminiClient();
     const testGen = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite",
+      model: GEMINI_GENERATE_MODEL,
       contents: "ping",
       config: { responseMimeType: "application/json" }
     });
-    results.gemini = { status: "ok", latencyMs: Date.now() - aiStart, message: "Gemini 3.1 Flash-Lite online." };
+    results.gemini = { status: "ok", latencyMs: Date.now() - aiStart, message: `${GEMINI_GENERATE_MODEL} online.` };
   } catch (e: any) {
     results.gemini = { status: "degraded", latencyMs: Date.now() - aiStart, message: `Gemini check: ${e.message || e}` };
   }
@@ -1479,10 +1480,10 @@ app.post("/api/opportunities/discover", async (req, res) => {
 
   try {
     // Check for API Key first before running any queries
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_LIVE_API_KEY;
     if (!apiKey) {
-      logTrace("⚠️ WARNING: GEMINI_API_KEY is not defined in Settings > Secrets. AI operations will fail.");
-      throw new Error("GEMINI_API_KEY is not defined. Please configure it in Settings > Secrets.");
+      logTrace("⚠️ WARNING: GEMINI_API_KEY is not configured. AI operations will fail.");
+      throw new Error("Gemini is not configured. Set GEMINI_API_KEY as a Cloudflare secret with `wrangler secret put GEMINI_API_KEY`, then redeploy.");
     } else {
       logTrace("✅ GEMINI_API_KEY detected in server environment.");
     }
@@ -2654,7 +2655,7 @@ Return strictly valid JSON with key:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: GEMINI_GENERATE_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json"
@@ -2886,7 +2887,7 @@ Return strictly valid JSON with this structure:
 
     const aiClient = getGeminiClient();
     const response = await aiClient.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: GEMINI_GENERATE_MODEL,
       contents: prompt,
       config: { responseMimeType: "application/json" }
     });
@@ -2982,7 +2983,7 @@ Return JSON:
 
         const aiClient = getGeminiClient();
         const response = await aiClient.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_GENERATE_MODEL,
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -3698,7 +3699,7 @@ async function executeOfflineTasks() {
         `;
 
         const response = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_GENERATE_MODEL,
           contents: prompt,
           config: { responseMimeType: "application/json" }
         });
@@ -3946,7 +3947,7 @@ Return a JSON array with up to 3 qualified opportunities:
         let newOpps: any[] = [];
         try {
           const genRes = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+            model: GEMINI_GENERATE_MODEL,
             contents: evalPrompt
           });
           const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -4028,7 +4029,7 @@ Extract up to 3 qualified opportunities in JSON format:
       let discovered: any[] = [];
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_GENERATE_MODEL,
           contents: evalPrompt
         });
         const parsed = JSON.parse(genRes.text?.replace(/```json|```/g, "").trim() || "[]");
@@ -4190,7 +4191,7 @@ Rules:
       let generatedDraft = "";
       try {
         const genRes = await ai.models.generateContent({
-          model: "gemini-3.6-flash",
+          model: GEMINI_GENERATE_MODEL,
           contents: draftPrompt
         });
         generatedDraft = genRes.text || targetOpp.responseDraft;
@@ -4277,7 +4278,7 @@ Respond in 1-2 short, high-impact paragraphs. Zero corporate buzzwords.`;
     let replyText = "";
     try {
       const genRes = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
+        model: GEMINI_GENERATE_MODEL,
         contents: prompt
       });
       replyText = genRes.text || "";
@@ -5122,7 +5123,7 @@ app.post("/api/partner/chat", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
+    const model = GEMINI_GENERATE_MODEL;
 
     let contextPrompt = `You are 'ScoutPartner', an elite B2B Sales Strategist, Positioning Consultant, and copywriter specialized in winning custom-software and high-ticket automation consulting deals.
 Your partner is a solo software developer and automation engineer who has built an "Opportunity Radar" app.
@@ -5182,7 +5183,7 @@ app.post("/api/learning/simulate", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
+    const model = GEMINI_GENERATE_MODEL;
 
     // Take top 4 opportunities to keep payload size optimal
     const sample = opportunities.slice(0, 4);
@@ -5260,7 +5261,7 @@ app.post("/api/learning/optimize", async (req, res) => {
 
   try {
     const ai = getGeminiClient();
-    const model = "gemini-3.6-flash";
+    const model = GEMINI_GENERATE_MODEL;
     const botConfig = loadBotConfig();
 
     // Group current opportunities to feed outcomes
@@ -5725,7 +5726,7 @@ ${JSON.stringify(computerLogs || [], null, 2)}
     });
 
     // Request structured JSON output from Gemini with valid fallback models & backoff
-    const modelCandidates = ["gemini-3.6-flash", "gemini-3.6-flash"];
+    const modelCandidates = [GEMINI_GENERATE_MODEL, "gemini-3.5-flash-lite"];
     let response: any = null;
     let lastError: any = null;
 

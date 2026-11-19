@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { GEMINI_LIVE_MODEL } from "./llm";
 
 dotenv.config();
 
@@ -71,7 +72,7 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
                 metadata: { title: "P.A.C. Partner Agent" },
                 config: {
                   think: {
-                    provider: { type: "google", model: "gemini-2.5-flash" },
+                    provider: { type: "google", model: GEMINI_LIVE_MODEL },
                     prompt: GLOBAL_PAC_SYSTEM_PROMPT,
                     functions: [
                       {
@@ -197,7 +198,7 @@ export async function setupDeepgramAgent(apiKey: string, projectId?: string, voi
           metadata: { title: "P.A.C. Partner Agent" },
           config: {
             think: {
-              provider: { type: "google", model: "gemini-2.5-flash" },
+              provider: { type: "google", model: GEMINI_LIVE_MODEL },
               prompt: GLOBAL_PAC_SYSTEM_PROMPT,
               functions: [
                 {

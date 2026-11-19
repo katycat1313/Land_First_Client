@@ -46,12 +46,27 @@ APP_PASSWORD=
 
 # Google Gemini API Key
 GEMINI_API_KEY=your_gemini_api_key_here
+# Optional model overrides (defaults shown)
+GEMINI_GENERATE_MODEL=gemini-3.8-flash
+GEMINI_LIVE_MODEL=gemini-3.8-live
 
 # Deepgram Voice Credentials (for P.A.C. voice co-founder)
 DEEPGRAM_API_KEY=your_deepgram_api_key_here
 DEEPGRAM_PROJECT_ID=your_deepgram_project_id_here
 DEEPGRAM_AGENT_ID=your_deepgram_agent_id_here
 ```
+
+For Cloudflare Workers, store the Gemini key as a secret rather than a plain
+variable:
+
+```bash
+wrangler secret put GEMINI_API_KEY
+wrangler deploy
+```
+
+Use a Google AI API key, not an OAuth access token and not a value prefixed
+with `Bearer`. `GEMINI_LIVE_API_KEY` remains a legacy compatibility fallback;
+new deployments should use `GEMINI_API_KEY`.
 
 ---
 
